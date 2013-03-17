@@ -1,0 +1,32 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/philipp/entw/gpulab/superresolution_task/src/imagepyramid/imagepyramid.hpp
+
+/home/philipp/entw/gpulab/superresolution_task/src/imagepyramid/imagepyramidcpu.cpp
+imagepyramid.hpp
+/home/philipp/entw/gpulab/superresolution_task/src/imagepyramid/imagepyramid.hpp
+math.h
+-
+linearoperations/linearoperations.h
+-
+stdio.h
+-
+string.h
+-
+iostream
+-
+opencv2/highgui/highgui.hpp
+-
+opencv2/imgproc/imgproc.hpp
+-
+
+src/linearoperations/linearoperations.h
+stdlib.h
+-
+

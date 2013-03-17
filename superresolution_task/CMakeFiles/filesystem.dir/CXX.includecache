@@ -1,0 +1,24 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/philipp/entw/gpulab/superresolution_task/src/filesystem/filesystem.cpp
+stdio.h
+-
+filesystem/filesystem.h
+-
+
+src/filesystem/filesystem.h
+dirent.h
+-
+string
+-
+vector
+-
+list
+-
+
