@@ -1,0 +1,22 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/philipp/entw/gpulab/superresolution_task/src/linearoperations/linearoperations.cpp
+linearoperations.h
+/home/philipp/entw/gpulab/superresolution_task/src/linearoperations/linearoperations.h
+stdio.h
+-
+iostream
+-
+math.h
+-
+
+/home/philipp/entw/gpulab/superresolution_task/src/linearoperations/linearoperations.h
+stdlib.h
+-
+
