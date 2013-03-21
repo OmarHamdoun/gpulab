@@ -296,11 +296,80 @@ void sorflow_gpu_nonlinear_warp_level
 )
 {
 	// ### Implement Me ###
+	
+	// TODO COMPUTE DIFFUSIVITY
+	
+	// TODO CALL sorflow_nonlinear_warp_sor_shared
 }
 
 
 float FlowLibGpuSOR::computeFlow()
 {
 	// ### Implement Me###
+	float lambda = _lambda * 255.0f;
+	
+	int   max_rec_depth;
+	int   warp_max_levels;
+	int   rec_depth;
+	
+	warp_max_levels = computeMaxWarpLevels();
+	
+	max_rec_depth = (((_start_level+1) < warp_max_levels) ?
+				(_start_level+1) : warp_max_levels) -1;
+	
+	if(max_rec_depth >= _I1pyramid->nl){
+	max_rec_depth = _I1pyramid->nl-1;
+	}
+	
+	unsigned int nx_fine, ny_fine, nx_coarse=0, ny_coarse=0;
+	
+	float hx_fine;
+	float hy_fine;
+	
+	for(unsigned int p=0;p<_nx*_ny;p++){
+	_u1[p] = _u2[p] = 0.0f;
+	}
+	
+	for(rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)	{
+	
+		nx_fine = _I1pyramid->nx[rec_depth];
+		ny_fine = _I1pyramid->ny[rec_depth];
+		
+		hx_fine=(float)_nx/(float)nx_fine;
+		hy_fine=(float)_ny/(float)ny_fine;
+		
+		const float hx_1 = 1.0f / (2.0f*hx_fine);
+		const float hy_1 = 1.0f / (2.0f*hy_fine);
+		const float hx_2 = lambda/(hx_fine*hx_fine);
+		const float hy_2 = lambda/(hy_fine*hy_fine);
+			
+		if(rec_depth < max_rec_depth)	
+		{			
+			// TODO CALL resampleAreaParallelSeparate
+		}
+		
+		if(rec_depth >= _end_level)
+		{				
+			// TODO CALL backwardRegistrationBilinearFunctionGlobal
+		
+			for(unsigned int p=0;p<nx_fine*ny_fine;p++) _u1lvl[p] = _u2lvl[p] = 0.0f;
+	
+			for(unsigned int i=0;i<_oi;i++)
+			{
+			
+				// TODO CALL sorflow_update_robustifications_warp_tex_shared
+				
+				// TODO CALL sorflow_update_righthandside_shared
+				
+				// TODO CALL sorflow_gpu_nonlinear_warp_level
+			}
+			
+			// TODO CALL add_flow_fields			
+		}
+			nx_coarse = nx_fine;
+			ny_coarse = ny_fine;
+	}		
+	
+	return -1.0f;
 }
 
