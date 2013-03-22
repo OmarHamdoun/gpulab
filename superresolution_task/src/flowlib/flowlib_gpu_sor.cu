@@ -30,6 +30,7 @@ bool textures_flow_sor_initialized = false;
 
 #define IMAGE_FILTER_METHOD cudaFilterModeLinear
 #define SF_TEXTURE_OFFSET 0.5f
+#define DEBUG  1
 
 #define SF_BW 16
 #define SF_BH 16
@@ -242,37 +243,33 @@ void sorflow_gpu_nonlinear_warp_level(const float *u_g, const float *v_g,
 		int inner_iterations, float data_epsilon, float diff_epsilon)
 {
 	// ### Implement Me ###
-	
+
 	// TODO COMPUTE DIFFUSIVITY
-	
+
 	// TODO CALL sorflow_nonlinear_warp_sor_shared
 }
 
-__global__ void initializeDisplacmentZero(float* _u_g) {
+__global__ void initializeDisplacmentZero(float* _u_g)
+{
 	int p = threadIdx.x + blockDim.x * blockIdx.x;
 	_u_g[p] = 0.0f;
 }
 
-
 float FlowLibGpuSOR::computeFlow()
 {
-
-	fprintf(stderr, "\computeFlowGPU");
+	// main algorithm goes here
+	fprintf(stderr, "\computeFlowGPU\n");
 
 	//all per run variables goes here
-	float lambda = _lambda * 255.0f;
-
-	int max_rec_depth;
-	int warp_max_levels;
-	int rec_depth;
-
-	float hx_fine;
-	float hy_fine;
-
+	int max_rec_depth;/*maximal depth*/
+	int warp_max_levels;/*maximal warp levels*/
+	int rec_depth;/*actual depth*/
+	float hx_fine, hy_fine;
 	unsigned int nx_fine, ny_fine, nx_coarse = 0, ny_coarse = 0;
 
+	//get max warp levels
 	warp_max_levels = computeMaxWarpLevels();
-
+	//get max rec depth
 	max_rec_depth = (
 			((_start_level + 1) < warp_max_levels) ?
 					(_start_level + 1) : warp_max_levels) - 1;
@@ -283,23 +280,30 @@ float FlowLibGpuSOR::computeFlow()
 		max_rec_depth = _I1pyramid->nl - 1;
 	}
 
-	//set initial vector components to zero
-	for (unsigned int p = 0; p < _nx * _ny; p++)
-	{
-		_u1[p] = _u2[p] = 0.0f;
-	}
+#ifdef DEBUG
+	printf("max_rec_depth=%d, warp_max_levels=%d\n", max_rec_depth,
+			warp_max_levels);
+#endif
 
 	// initial grid and block dimensions
 	int initial_ngx = (_nx % SF_BW) ? ((_nx / SF_BW) + 1) : (_nx / SF_BW);
 	int initial_ngy = (_ny % SF_BH) ? ((_ny / SF_BH) + 1) : (_ny / SF_BH);
 	dim3 initial_dimGrid(initial_ngx, initial_ngy);
 	dim3 initial_dimBlock(SF_BW, SF_BH);
+
+	//set initial vector components to zero
+	for (unsigned int p = 0; p < _nx * _ny; p++)
+	{
+		_u1[p] = _u2[p] = 0.0f;
+	}
 	initializeDisplacmentZero<<<initial_dimGrid, initial_dimBlock>>>(_u1_g);
 	initializeDisplacmentZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g);
 
+	//////////////////////////////////////////////////////////////
+	// loop through image pyramide
+	//////////////////////////////////////////////////////////////
 	for (rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)
 	{
-
 		//all per interation variables goes here
 		nx_fine = _I1pyramid->nx[rec_depth];
 		ny_fine = _I1pyramid->ny[rec_depth];
@@ -307,59 +311,91 @@ float FlowLibGpuSOR::computeFlow()
 		hx_fine = (float) _nx / (float) nx_fine;
 		hy_fine = (float) _ny / (float) ny_fine;
 
-		//const float hx_1 = 1.0f / (2.0f * hx_fine);
-		//const float hy_1 = 1.0f / (2.0f * hy_fine);
-		//const float hx_2 = lambda / (hx_fine * hx_fine);
-		//const float hy_2 = lambda / (hy_fine * hy_fine);
+#ifdef DEBUG
+		printf(
+				"level=%d, (rec_depth=%d) ===> nx_fine=%d, ny_fine=%d, nx_coarse=%d, ny_coarse=%d, hx_fine=%f, hy_fine=%f\n",
+				max_rec_depth - rec_depth, rec_depth, nx_fine, ny_fine,
+				nx_coarse, ny_coarse, hx_fine, hy_fine);
+#endif
 
-		// grid and block dimensions
-		int ngx = (nx_fine % SF_BW) ? ((nx_fine / SF_BW) + 1) : (nx_fine / SF_BW);
-		int ngy = (ny_fine % SF_BH) ? ((ny_fine / SF_BH) + 1) : (ny_fine / SF_BH);
+		// current grid and block dimensions
+		int ngx =
+				(nx_fine % SF_BW) ? ((nx_fine / SF_BW) + 1) : (nx_fine / SF_BW);
+		int ngy =
+				(ny_fine % SF_BH) ? ((ny_fine / SF_BH) + 1) : (ny_fine / SF_BH);
 		dim3 dimGrid(ngx, ngy);
 		dim3 dimBlock(SF_BW, SF_BH);
 
-		if (_debug)
+		// resize flowfield to current level
+		if (rec_depth < max_rec_depth)
 		{
-			printf("%s", "lala");
-			sprintf(_debugbuffer, "debug/CI1 %i.png", rec_depth);
-			saveFloatImage(_debugbuffer, _I1pyramid->level[rec_depth], nx_fine,
-					ny_fine, 1, 1.0f, -1.0f);
-			showFloatImage("lala", _I1pyramid->level[rec_depth], nx_fine,
-					ny_fine, 1, 0, 255);
-
-			//sprintf(_debugbuffer,"debug/CI2 %i.png",rec_depth);
-			//saveFloatImage(_debugbuffer,_I2pyramid->level[rec_depth],nx_fine,ny_fine,1,1.0f,-1.0f);
+			//TODO use gpu version
+			resampleAreaParallelSeparate(_u1_g, _u1_g, nx_coarse, ny_coarse,
+					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
+					_I2pyramid->pitch[rec_depth], _b1);
+			resampleAreaParallelSeparate(_u2_g, _u2_g, nx_coarse, ny_coarse,
+					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
+					_I2pyramid->pitch[rec_depth], _b2);
 		}
 
+		/*
+		 if (_debug)
+		 {
+		 printf("%s", "lala");
+		 sprintf(_debugbuffer, "debug/CI1 %i.png", rec_depth);
+		 saveFloatImage(_debugbuffer, _I1pyramid->level[rec_depth], nx_fine,
+		 ny_fine, 1, 1.0f, -1.0f);
+		 showFloatImage("lala", _I1pyramid->level[rec_depth], nx_fine,
+		 ny_fine, 1, 0, 255);
+
+		 //sprintf(_debugbuffer,"debug/CI2 %i.png",rec_depth);
+		 //saveFloatImage(_debugbuffer,_I2pyramid->level[rec_depth],nx_fine,ny_fine,1,1.0f,-1.0f);
+		 }
+		 */
+
+		//bind textures to resampled images
 		int current_pitch = _I1pyramid->pitch[rec_depth];
 		bind_textures(_I1pyramid->level[rec_depth],
 				_I2pyramid->level[rec_depth], nx_fine, ny_fine, current_pitch);
 
-		if (rec_depth < max_rec_depth)
-		{
-			// TODO CALL resampleAreaParallelSeparate
-		}
-
 		if (rec_depth >= _end_level)
 		{
-			// TODO CALL backwardRegistrationBilinearFunctionGlobal
+			// warp original image by resized flow field
+			backwardRegistrationBilinearFunctionGlobal(
+					_I2pyramid->level[rec_depth], _u1_g, _u2_g, _I2warp,
+					_I1pyramid->level[rec_depth], nx_fine, ny_fine,
+					_I2pyramid->pitch[rec_depth], _I1pyramid->pitch[rec_depth],
+					hx_fine, hy_fine);
 
-			for (unsigned int p = 0; p < nx_fine * ny_fine; p++)
-				_u1lvl[p] = _u2lvl[p] = 0.0f;
+			//set du/dv to zero
+			initializeDisplacmentZero<<<dimGrid, dimBlock>>>(_u1lvl);
+			initializeDisplacmentZero<<<dimGrid, dimBlock>>>(_u2lvl);
+
+			//robustification loop
 			for (unsigned int i = 0; i < _oi; i++)
 			{
-
+				// update robustification terms
 				// TODO CALL sorflow_update_robustifications_warp_tex_shared
 
+				// update righthand side of equation
 				// TODO CALL sorflow_update_righthandside_shared
 
+				// inner sor loop
 				// TODO CALL sorflow_gpu_nonlinear_warp_level
 			}
 
-			// TODO CALL add_flow_fields
+			// add the flow fields
+			add_flow_fields<<<dimGrid, dimBlock>>>
+					(_u1lvl, _u2lvl, _u1_g, _u2_g, nx_fine, ny_fine, _pitchf1);
 		}
+
 		nx_coarse = nx_fine;
 		ny_coarse = ny_fine;
+
+#ifdef DEBUG
+		printf("End of interation\n");
+#endif
+
 	}
 
 	unbind_textures_flow_sor();
