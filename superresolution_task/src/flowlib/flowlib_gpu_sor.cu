@@ -242,6 +242,10 @@ void sorflow_gpu_nonlinear_warp_level(const float *u_g, const float *v_g,
 		int inner_iterations, float data_epsilon, float diff_epsilon)
 {
 	// ### Implement Me ###
+	
+	// TODO COMPUTE DIFFUSIVITY
+	
+	// TODO CALL sorflow_nonlinear_warp_sor_shared
 }
 
 __global__ void initializeDisplacmentZero(float* _u_g) {
@@ -252,6 +256,7 @@ __global__ void initializeDisplacmentZero(float* _u_g) {
 
 float FlowLibGpuSOR::computeFlow()
 {
+
 	fprintf(stderr, "\computeFlowGPU");
 
 	//all per run variables goes here
