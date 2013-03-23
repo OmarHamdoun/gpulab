@@ -154,11 +154,127 @@ void gaussBlurSeparateMirrorGpu(float *in_g, float *out_g, int nx, int ny,
 	// ### Implement me ###
 }
 
+__global__ void resampleAreaParallelSeparate_x
+(
+		const float * in_g,
+		float * out_g,
+		int nx,
+		int ny,
+		float hx,
+		int pitchf1_in,
+		float factor = 0.0f
+)
+{
+	if( factor == 0.0f ) { factor = 1/hx; }
+
+	int ix = threadIdx.x + blockIdx.x * blockDim.x;
+	int iy = threadIdx.y + blockIdx.y * blockDim.y;
+
+	int index = ix + iy * pitchf1_in; // global index for out image
+
+	if( ix < nx && iy < ny)
+	{
+		// initialising out
+		out_g[ index ] = 0.0f;
+
+		float px = (float)ix * hx;
+
+		float left = ceil(px) - px;
+		if(left > hx) left = hx;
+
+		float midx = hx - left;
+		float right = midx - floorf(midx);
+		midx = midx - right;
+
+		if( left > 0.0f )
+		{
+			// using pitchf1_in instead of nx_orig in original code
+			out_g[index] += in_g[ iy * pitchf1_in + (int) floor(px) ] * left * factor; // look out for conversion of coordinates
+			px += 1.0f;
+		}
+		while(midx > 0.0f)
+		{
+			// using pitchf1_in instead of nx_orig in original code
+			out_g[index] += in_g[ iy * pitchf1_in + (int)(floor(px))] * factor;
+			px += 1.0f;
+			midx -= 1.0f;
+		}
+		if(right > RESAMPLE_EPSILON)
+		{
+			// using pitchf1_in instead of nx_orig in original code
+			out_g[index] += in_g[ iy * pitchf1_in + (int)(floor(px))] * right * factor;
+		}
+	}
+}
+
+__global__ void resampleAreaParallelSeparate_y
+(
+		const float * in_g,
+		float * out_g,
+		int nx,
+		int ny,
+		float hy,
+		int pitchf1_out,
+		float factor = 0.0f // need
+)
+{
+	if(factor == 0.0f) factor = 1.0f/hy;
+
+	int ix = threadIdx.x + blockIdx.x * blockDim.x;
+	int iy = threadIdx.y + blockIdx.y * blockDim.y;
+
+	int index = ix + iy * pitchf1_out; // global index for out image
+									  // used pitch instead  of blockDim.x
+
+	if( ix < nx && iy < ny ) // guards
+	{
+		out_g[index] = 0.0f;
+
+		float py = (float)iy * hy;
+		float top = ceil(py) - py;
+
+		if(top > hy) top = hy;
+		float midy = hy - top;
+
+		float bottom = midy - floorf(midy);
+		midy = midy - bottom;
+
+		if(top > 0.0f)
+		{
+			// using pitch for helper array since these all arrays have same pitch
+			out_g[index] += in_g[(int)(floor(py)) * pitchf1_out + ix ] * top * factor;
+			py += 1.0f;
+		}
+		while(midy > 0.0f)
+		{
+			out_g[index] += in_g[(int)(floor(py)) * pitchf1_out + ix ] * factor;
+			py += 1.0f;
+			midy -= 1.0f;
+		}
+		if(bottom > RESAMPLE_EPSILON)
+		{
+			out_g[index] += in_g[(int)(floor(py)) * pitchf1_out + ix ] * bottom * factor;
+		}
+	}
+}
+
 void resampleAreaParallelSeparate(const float *in_g, float *out_g, int nx_in,
 		int ny_in, int pitchf1_in, int nx_out, int ny_out, int pitchf1_out,
 		float *help_g, float scalefactor)
 {
-	// ### Implement me ###
+	// helper array is already allocated on the GPU as _b1, now help_g
+
+	// can reduce no of blocks for first pass
+	dim3 dimGrid((int)ceil((float)nx_out/LO_BW), (int)ceil((float)ny_out/LO_BH));
+	dim3 dimBlock(LO_BW,LO_BH);
+
+	float hx = (float) nx_in/ (float) nx_out;
+	float factor = (float)(nx_out)/(float)(nx_in);
+	resampleAreaParallelSeparate_x<<< dimGrid, dimBlock >>>( in_g, help_g, nx_out, ny_in, hx, pitchf1_in, factor);
+
+	float hy = (float)(ny_in)/(float)(ny_out);
+	factor = scalefactor*(float)(ny_out)/(float)(ny_in);
+	resampleAreaParallelSeparate_y<<< dimGrid, dimBlock >>>( help_g, out_g, nx_out, ny_out, hy, pitchf1_out, factor );
 }
 
 void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,

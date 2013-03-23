@@ -242,23 +242,83 @@ void sorflow_gpu_nonlinear_warp_level(const float *u_g, const float *v_g,
 		float lambda, float overrelaxation, int outer_iterations,
 		int inner_iterations, float data_epsilon, float diff_epsilon)
 {
-	// ### Implement Me ###
+	bool red = 0;
 
-	// TODO COMPUTE DIFFUSIVITY
+	// grid and block dimensions
+	int ngx = (nx % SF_BW) ? ((nx / SF_BW) + 1) : (nx / SF_BW);
+	int ngy = (ny % SF_BH) ? ((ny / SF_BH) + 1) : (ny / SF_BH);
+	dim3 dimGrid(ngx, ngy);
+	dim3 dimBlock(SF_BW, SF_BH);
 
-	// TODO CALL sorflow_nonlinear_warp_sor_shared
+	for (int i = 0; i < outer_iterations; i++)
+	{
+
+		//Update Robustifications
+		sorflow_update_robustifications_warp_tex_shared<<<dimGrid, dimBlock>>>(
+				u_g, v_g, du_g, dv_g, penaltyd_g, penaltyr_g, nx, ny, hx, hy,
+				data_epsilon, diff_epsilon, pitchf1);
+		//Update Righthand Side
+		sorflow_update_righthandside_shared<<<dimGrid, dimBlock>>>(u_g, v_g,
+				penaltyd_g, penaltyr_g, bu_g, bv_g, nx, ny, hx, hy, lambda,
+				pitchf1);
+
+		//
+		for (int j = 0; j < inner_iterations; j++)
+		{
+			red = 0;
+			sorflow_nonlinear_warp_sor_shared<<<dimGrid, dimBlock>>>(bu_g, bv_g,
+					penaltyd_g, penaltyr_g, du_g, dv_g, nx, ny, hx, hy, lambda,
+					overrelaxation, red, pitchf1);
+
+			red = 1;
+			sorflow_nonlinear_warp_sor_shared<<<dimGrid, dimBlock>>>(bu_g, bv_g,
+					penaltyd_g, penaltyr_g, du_g, dv_g, nx, ny, hx, hy, lambda,
+					overrelaxation, red, pitchf1);
+
+		}
+	}
 }
 
-__global__ void initializeDisplacmentZero(float* _u_g)
+/*
+ * Initializes an float array to zero
+ */__global__ void initializeToZero(float* array, int width, int height,
+		int pitch, bool black)
 {
-	int p = threadIdx.x + blockDim.x * blockIdx.x;
-	_u_g[p] = 0.0f;
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x < width && y < height)
+	{
+		if (black)
+			array[x + y * pitch] = 0.0f;
+		else
+			array[x + y * pitch] = 255.0f;
+	}
+}
+
+/*
+ * Initializes two similar float arrays to zero
+ */__global__ void initializeTwoToZero(float* array1, float* array2, int width,
+		int height, int pitch)
+{
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x < width && y < height)
+	{
+		array1[x + y * pitch] = 255.0f;
+		array2[x + y * pitch] = 128.0f;
+	}
 }
 
 float FlowLibGpuSOR::computeFlow()
 {
+	bool verbose = 1;
 	// main algorithm goes here
-	fprintf(stderr, "\computeFlowGPU\n");
+	if (verbose)
+		fprintf(stderr, "\computeFlowGPU\n");
+
+	float lambda = _lambda * 255.0f;
 
 	//all per run variables goes here
 	int max_rec_depth;/*maximal depth*/
@@ -276,9 +336,7 @@ float FlowLibGpuSOR::computeFlow()
 
 	//get max rec depth
 	if (max_rec_depth >= _I1pyramid->nl)
-	{
 		max_rec_depth = _I1pyramid->nl - 1;
-	}
 
 #ifdef DEBUG
 	printf("max_rec_depth=%d, warp_max_levels=%d\n", max_rec_depth,
@@ -291,16 +349,41 @@ float FlowLibGpuSOR::computeFlow()
 	dim3 initial_dimGrid(initial_ngx, initial_ngy);
 	dim3 initial_dimBlock(SF_BW, SF_BH);
 
+	if (verbose)
+		fprintf(stderr, "\nInitializing _u1_g & _u2_g to black");
+
 	//set initial vector components to zero
 	for (unsigned int p = 0; p < _nx * _ny; p++)
-	{
 		_u1[p] = _u2[p] = 0.0f;
-	}
-	initializeDisplacmentZero<<<initial_dimGrid, initial_dimBlock>>>(_u1_g);
-	initializeDisplacmentZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g);
+
+	// initialize horizontal and vertical components of the flow
+	if (verbose)
+		fprintf(stderr, "\nInitializing _u1_g & _u2_g to black");
+	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u1_g, _nx, _ny,
+			_pitchf1, true);
+	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g, _nx, _ny,
+			_pitchf1, true);
+
+#ifdef DEBUG
+	char* cudaDebug = "1_debug/cu1lvl.png";
+	showCudaImage(cudaDebug, _u2_g, _nx, _ny, _pitchf1, 1);
+#endif
+
+	if (verbose)
+		fprintf(stderr, "\nInitializing coarse portion _u1_g & _u2_g to white");
+	// hardcoding parameters for nx & ny as dimension of lowest resolution
+	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u1_g, 9, 16,
+			_pitchf1, false);
+	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g, 9, 16,
+			_pitchf1, false);
+
+#ifdef DEBUG
+	cudaDebug = "2_debug/cu1lvl.png";
+	showCudaImage(cudaDebug, _u2_g, _nx, _ny, _pitchf1, 1);
+#endif
 
 	//////////////////////////////////////////////////////////////
-	// loop through image pyramide
+	// loop through image pyramide - main algorithm starts here //
 	//////////////////////////////////////////////////////////////
 	for (rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)
 	{
@@ -329,7 +412,6 @@ float FlowLibGpuSOR::computeFlow()
 		// resize flowfield to current level
 		if (rec_depth < max_rec_depth)
 		{
-			//TODO use gpu version
 			resampleAreaParallelSeparate(_u1_g, _u1_g, nx_coarse, ny_coarse,
 					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
 					_I2pyramid->pitch[rec_depth], _b1);
@@ -338,22 +420,8 @@ float FlowLibGpuSOR::computeFlow()
 					_I2pyramid->pitch[rec_depth], _b2);
 		}
 
-		/*
-		 if (_debug)
-		 {
-		 printf("%s", "lala");
-		 sprintf(_debugbuffer, "debug/CI1 %i.png", rec_depth);
-		 saveFloatImage(_debugbuffer, _I1pyramid->level[rec_depth], nx_fine,
-		 ny_fine, 1, 1.0f, -1.0f);
-		 showFloatImage("lala", _I1pyramid->level[rec_depth], nx_fine,
-		 ny_fine, 1, 0, 255);
-
-		 //sprintf(_debugbuffer,"debug/CI2 %i.png",rec_depth);
-		 //saveFloatImage(_debugbuffer,_I2pyramid->level[rec_depth],nx_fine,ny_fine,1,1.0f,-1.0f);
-		 }
-		 */
-
-		//bind textures to resampled images
+		//bind resampled images
+		//TODO understand texture binding
 		int current_pitch = _I1pyramid->pitch[rec_depth];
 		bind_textures(_I1pyramid->level[rec_depth],
 				_I2pyramid->level[rec_depth], nx_fine, ny_fine, current_pitch);
@@ -364,29 +432,27 @@ float FlowLibGpuSOR::computeFlow()
 			backwardRegistrationBilinearFunctionGlobal(
 					_I2pyramid->level[rec_depth], _u1_g, _u2_g, _I2warp,
 					_I1pyramid->level[rec_depth], nx_fine, ny_fine,
-					_I2pyramid->pitch[rec_depth], _I1pyramid->pitch[rec_depth],
-					hx_fine, hy_fine);
+					_I2pyramid->pitch[rec_depth], current_pitch, hx_fine,
+					hy_fine);
+
+			// synchronize threads
+			cutilSafeCall(cudaThreadSynchronize());
 
 			//set du/dv to zero
-			initializeDisplacmentZero<<<dimGrid, dimBlock>>>(_u1lvl);
-			initializeDisplacmentZero<<<dimGrid, dimBlock>>>(_u2lvl);
+			initializeToZero<<<dimGrid, dimBlock>>>(_u1lvl, nx_fine, ny_fine,
+					current_pitch, true);
+			initializeToZero<<<dimGrid, dimBlock>>>(_u2lvl, nx_fine, ny_fine,
+					current_pitch, true);
 
-			//robustification loop
-			for (unsigned int i = 0; i < _oi; i++)
-			{
-				// update robustification terms
-				// TODO CALL sorflow_update_robustifications_warp_tex_shared
-
-				// update righthand side of equation
-				// TODO CALL sorflow_update_righthandside_shared
-
-				// inner sor loop
-				// TODO CALL sorflow_gpu_nonlinear_warp_level
-			}
+			// compute incremental update for this level // A*x = b
+			sorflow_gpu_nonlinear_warp_level(_u1_g, _u2_g, _u1lvl, _u2lvl, _b1,
+					_b2, _penDat, _penReg, nx_fine, ny_fine, _pitchf1, hx_fine,
+					hy_fine, lambda, _overrelaxation, _oi, _ii, _dat_epsilon,
+					_reg_epsilon);
 
 			// add the flow fields
-			add_flow_fields<<<dimGrid, dimBlock>>>
-					(_u1lvl, _u2lvl, _u1_g, _u2_g, nx_fine, ny_fine, _pitchf1);
+			add_flow_fields<<<dimGrid, dimBlock>>>(_u1lvl, _u2lvl, _u1_g, _u2_g,
+					nx_fine, ny_fine, _pitchf1);
 		}
 
 		nx_coarse = nx_fine;
