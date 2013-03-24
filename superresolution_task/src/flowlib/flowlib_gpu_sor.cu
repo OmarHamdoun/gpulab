@@ -146,7 +146,160 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 		const float *dv_g, float *penaltyd_g, float *penaltyr_g, int nx, int ny,
 		float hx, float hy, float data_epsilon, float diff_epsilon, int pitchf1)
 {
-	// ### Implement Me###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	//scale
+	const float hx_1 = 1.0f / (2.0f * hx);
+	const float hy_1 = 1.0f / (2.0f * hy);
+
+	int idx = y * pitchf1 + x;
+
+	//allocate shared mem blocks for flow field
+	__shared__ float shared_u1[SF_BW + 2][SF_BH + 2];
+	__shared__ float shared_u2[SF_BW + 2][SF_BH + 2];
+	__shared__ float shared_du1[SF_BW + 2][SF_BH + 2];
+	__shared__ float shared_du2[SF_BW + 2][SF_BH + 2];
+
+	const int tx = threadIdx.x + 1;
+	const int ty = threadIdx.y + 1;
+
+	if (x < nx && y < ny)
+	{
+		// setup shared memory
+		shared_u1[tx][ty] = u_g[idx];
+		shared_u2[tx][ty] = v_g[idx];
+		shared_du1[tx][ty] = du_g[idx];
+		shared_du2[tx][ty] = dv_g[idx];
+
+		//left border
+		if (x == 0)
+		{
+			// left side of the image
+			shared_u1[0][ty] = shared_u1[tx][ty];
+			shared_u2[0][ty] = shared_u2[tx][ty];
+			shared_du1[0][ty] = shared_du1[tx][ty];
+			shared_du2[0][ty] = shared_du2[tx][ty];
+		}
+		else if (threadIdx.x == 0)
+		{
+			// left side of the block
+			shared_u1[0][ty] = u_g[idx - 1];
+			shared_u2[0][ty] = v_g[idx - 1];
+			shared_du1[0][ty] = du_g[idx - 1];
+			shared_du2[0][ty] = dv_g[idx - 1];
+		}
+
+		//right border
+		if (x == nx - 1)
+		{
+			// right side of the image
+			shared_u1[tx + 1][ty] = shared_u1[tx][ty];
+			shared_u2[tx + 1][ty] = shared_u2[tx][ty];
+			shared_du1[tx + 1][ty] = shared_du1[tx][ty];
+			shared_du2[tx + 1][ty] = shared_du2[tx][ty];
+		}
+		else if (threadIdx.x == SF_BW - 1)
+		{
+			// right side of the block
+			shared_u1[tx + 1][ty] = u_g[idx + 1];
+			shared_u2[tx + 1][ty] = v_g[idx + 1];
+			shared_du1[tx + 1][ty] = du_g[idx + 1];
+			shared_du2[tx + 1][ty] = dv_g[idx + 1];
+		}
+
+		//top border
+		if (y == 0)
+		{
+			// top side of the image
+			shared_u1[tx][0] = shared_u1[tx][ty];
+			shared_u2[tx][0] = shared_u2[tx][ty];
+			shared_du1[tx][0] = shared_du1[tx][ty];
+			shared_du2[tx][0] = shared_du2[tx][ty];
+		}
+		else if (threadIdx.y == 0)
+		{
+			// top side of the block
+			shared_u1[tx][0] = u_g[idx - pitchf1];
+			shared_u2[tx][0] = v_g[idx - pitchf1];
+			shared_du1[tx][0] = du_g[idx - pitchf1];
+			shared_du2[tx][0] = dv_g[idx - pitchf1];
+		}
+
+		//bikini bottom border
+		if (y == ny - 1)
+		{
+			// bottom side of the image
+			shared_u1[tx][ty + 1] = shared_u1[tx][ty];
+			shared_u2[tx][ty + 1] = shared_u2[tx][ty];
+			shared_du1[tx][ty + 1] = shared_du1[tx][ty];
+			shared_du2[tx][ty + 1] = shared_du2[tx][ty];
+		}
+		else if (threadIdx.y == SF_BH - 1)
+		{
+			// bottom side of the block
+			shared_u1[tx][ty + 1] = u_g[idx + pitchf1];
+			shared_u2[tx][ty + 1] = v_g[idx + pitchf1];
+			shared_du1[tx][ty + 1] = du_g[idx + pitchf1];
+			shared_du2[tx][ty + 1] = dv_g[idx + pitchf1];
+		}
+	}
+
+	__syncthreads();
+
+	if (x < nx && y < ny)
+	{
+		// local sm indices
+		unsigned int sm_xminus1 = x == 0 ? tx : tx - 1;
+		unsigned int sm_xplus1 = x == nx - 1 ? tx : tx + 1;
+		unsigned int sm_yminus1 = y == 0 ? ty : ty - 1;
+		unsigned int sm_yplus1 = y == ny - 1 ? ty : ty + 1;
+
+		//global texture indices
+		const float tx_x   = (float) x                            + SF_TEXTURE_OFFSET;
+		const float tx_x1  = (float) ((x == nx - 1) ? x : x + 1)  + SF_TEXTURE_OFFSET;
+		const float tx_x_1 = (float) ((x == 0) ? x : x - 1)       + SF_TEXTURE_OFFSET;
+		const float tx_y   = (float) y                            + SF_TEXTURE_OFFSET;
+		const float tx_y1  = (float) ((y == ny - 1) ? y : y + 1)  + SF_TEXTURE_OFFSET;
+		const float tx_y_1 = (float) ((y == 0) ? y : y - 1)       + SF_TEXTURE_OFFSET;
+
+		//calculate Ix, Iy, It
+		float Ix = 0.5f
+				* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
+						- tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
+						+ tex2D(tex_flow_sor_I1, tx_x1, tx_y)
+						- tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
+
+		float Iy = 0.5f
+				* (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
+						- tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
+						+ tex2D(tex_flow_sor_I1, tx_x, tx_y1)
+						- tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
+
+		float It = tex2D(tex_flow_sor_I2, tx_x, tx_y)
+				- tex2D(tex_flow_sor_I1, tx_x, tx_y);
+
+		double dxu = (shared_u1[sm_xplus1][ty] - shared_u1[sm_xminus1][ty]
+				+ shared_du1[sm_xplus1][ty] - shared_du1[sm_xminus1][ty])
+				* hx_1;
+		double dyu = (shared_u1[tx][sm_yplus1] - shared_u1[tx][sm_yminus1]
+				+ shared_du1[tx][sm_yplus1] - shared_du1[tx][sm_yminus1])
+				* hy_1;
+		double dxv = (shared_u2[sm_xplus1][ty] - shared_u2[sm_xminus1][ty]
+				+ shared_du2[sm_xplus1][ty] - shared_du2[sm_xminus1][ty])
+				* hx_1;
+		double dyv = (shared_u2[tx][sm_yplus1] - shared_u2[tx][sm_yminus1]
+				+ shared_du2[tx][sm_yplus1] - shared_du2[tx][sm_yminus1])
+				* hy_1;
+
+		double dataterm = shared_du1[tx][ty] * Ix + shared_du2[tx][ty] * Iy
+				+ It;
+
+		//calculate penalty terms
+		penaltyd_g[idx] = 1.0f/sqrt(dataterm * dataterm + data_epsilon);
+		penaltyr_g[idx] = 1.0f/sqrt(
+				dxu * dxu + dxv * dxv + dyu * dyu + dyv * dyv + diff_epsilon);
+	}
 }
 
 /**
@@ -172,7 +325,161 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 		float *bu_g, float *bv_g, int nx, int ny, float hx, float hy,
 		float lambda, int pitchf1)
 {
-	// ### Implement Me###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	const float hx_1 = 1.0f / (2.0f * hx);
+	const float hy_1 = 1.0f / (2.0f * hy);
+	const float hx_2 = lambda / (hx * hx);
+	const float hy_2 = lambda / (hy * hy);
+
+	__shared__ float shared_u1[SF_BW+2][SF_BH+2];
+	__shared__ float shared_u2[SF_BW+2][SF_BH+2];
+	__shared__ float shared_penaltyd[SF_BW+2][SF_BH+2];
+	__shared__ float shared_penaltyr[SF_BW+2][SF_BH+2];
+
+	const int tx = threadIdx.x + 1;
+	const int ty = threadIdx.y + 1;
+	const int idx = y * pitchf1 + x;
+
+	//first setup shared memory
+	if (x < nx && y < ny)
+	{
+		// setup shared memory
+		shared_u1[tx][ty]       = u_g[idx];
+		shared_u2[tx][ty]       = v_g[idx];
+		shared_penaltyd[tx][ty] = penaltyd_g[idx];
+		shared_penaltyr[tx][ty] = penaltyr_g[idx];
+
+		//left border
+		if (x == 0)
+		{
+			// left side of the image
+			shared_u1[0][ty]       = shared_u1[tx][ty];
+			shared_u2[0][ty]       = shared_u2[tx][ty];
+			shared_penaltyd[0][ty] = shared_penaltyd[tx][ty];
+			shared_penaltyr[0][ty] = shared_penaltyr[tx][ty];
+		}
+		else if (threadIdx.x == 0)
+		{
+			// left side of the block
+			shared_u1[0][ty]       = u_g[idx - 1];
+			shared_u2[0][ty]       = v_g[idx - 1];
+			shared_penaltyd[0][ty] = penaltyd_g[idx - 1];
+			shared_penaltyr[0][ty] = penaltyr_g[idx - 1];
+		}
+
+		//right border
+		if (x == nx - 1)
+		{
+			// right side of the image
+			shared_u1[tx + 1][ty]       = shared_u1[tx][ty];
+			shared_u2[tx + 1][ty]       = shared_u2[tx][ty];
+			shared_penaltyd[tx + 1][ty] = shared_penaltyd[tx][ty];
+			shared_penaltyr[tx + 1][ty] = shared_penaltyr[tx][ty];
+		}
+		else if (threadIdx.x == SF_BW - 1)
+		{
+			// right side of the block
+			shared_u1[tx + 1][ty]       = u_g[idx + 1];
+			shared_u2[tx + 1][ty]       = v_g[idx + 1];
+			shared_penaltyd[tx + 1][ty] = penaltyd_g[idx + 1];
+			shared_penaltyd[tx + 1][ty] = penaltyr_g[idx + 1];
+		}
+
+		//top border
+		if (y == 0)
+		{
+			// top side of the image
+			shared_u1[tx][0]       = shared_u1[tx][ty];
+			shared_u2[tx][0]       = shared_u2[tx][ty];
+			shared_penaltyd[tx][0] = shared_penaltyd[tx][ty];
+			shared_penaltyd[tx][0] = shared_penaltyd[tx][ty];
+		}
+		else if (threadIdx.y == 0)
+		{
+			// top side of the block
+			shared_u1[tx][0]       = u_g[idx - pitchf1];
+			shared_u2[tx][0]       = v_g[idx - pitchf1];
+			shared_penaltyd[tx][0] = penaltyd_g[idx - pitchf1];
+			shared_penaltyd[tx][0] = penaltyr_g[idx - pitchf1];
+		}
+
+		//bikini bottom border
+		if (y == ny - 1)
+		{
+			// bottom side of the image
+			shared_u1[tx][ty + 1]       = shared_u1[tx][ty];
+			shared_u2[tx][ty + 1]       = shared_u2[tx][ty];
+			shared_penaltyd[tx][ty + 1] = shared_penaltyd[tx][ty];
+			shared_penaltyd[tx][ty + 1] = shared_penaltyd[tx][ty];
+		}
+		else if (threadIdx.y == SF_BH - 1)
+		{
+			// bottom side of the block
+			shared_u1[tx][ty + 1]       = u_g[idx + pitchf1];
+			shared_u2[tx][ty + 1]       = v_g[idx + pitchf1];
+			shared_penaltyd[tx][ty + 1] = penaltyd_g[idx + pitchf1];
+			shared_penaltyd[tx][ty + 1] = penaltyr_g[idx + pitchf1];
+		}
+	}
+	__syncthreads();
+
+	//then calculate righthand site
+	if (x < nx && y < ny)
+	{
+		// local sm indices
+		unsigned int sm_xminus1 = x == 0 ? tx : tx - 1;
+		unsigned int sm_xplus1  = x == nx - 1 ? tx : tx + 1;
+		unsigned int sm_yminus1 = y == 0 ? ty : ty - 1;
+		unsigned int sm_yplus1  = y == ny - 1 ? ty : ty + 1;
+
+		//global indices
+		const float tx_x   = (float) x                            + SF_TEXTURE_OFFSET;
+		const float tx_x1  = (float) ((x == nx - 1) ? x : x + 1)  + SF_TEXTURE_OFFSET;
+		const float tx_x_1 = (float) ((x == 0) ? x : x - 1)       + SF_TEXTURE_OFFSET;
+		const float tx_y   = (float) y                            + SF_TEXTURE_OFFSET;
+		const float tx_y1  = (float) ((y == ny - 1) ? y : y + 1)  + SF_TEXTURE_OFFSET;
+		const float tx_y_1 = (float) ((y == 0) ? y : y - 1)       + SF_TEXTURE_OFFSET;
+
+		//calculate Ix, Iy, It
+		float Ix = 0.5f
+				* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
+						- tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
+						+ tex2D(tex_flow_sor_I1, tx_x1, tx_y)
+						- tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
+
+		float Iy = 0.5f
+				* (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
+						- tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
+						+ tex2D(tex_flow_sor_I1, tx_x, tx_y1)
+						- tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
+
+		float It = tex2D(tex_flow_sor_I2, tx_x, tx_y)
+				  - tex2D(tex_flow_sor_I1, tx_x, tx_y);
+
+		float xp = x<nx-1 ? (shared_penaltyr[sm_xplus1][ty]  + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
+		float xm = x>0    ? (shared_penaltyr[sm_xminus1][ty] + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
+		float yp = y<ny-1 ? (shared_penaltyr[tx][sm_yplus1]  + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
+		float ym = y>0    ? (shared_penaltyr[tx][sm_yminus1] + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
+		//sum up elements
+		float sum = xp + xm + yp + ym;
+
+		bu_g[idx] = -shared_penaltyd[tx][ty] * Ix*It
+							+ (x>0    ? xm*shared_u1[sm_xminus1][ty] : 0.0f)
+							+ (x<nx-1 ? xp*shared_u1[sm_xplus1][ty]  : 0.0f)
+							+ (y>0    ? ym*shared_u1[tx][sm_yminus1] : 0.0f)
+							+ (y<ny-1 ? yp*shared_u1[tx][sm_yplus1]  : 0.0f)
+							- sum * shared_u1[tx][ty];
+
+		bv_g[idx] = -shared_penaltyd[tx][ty] * Iy*It
+							+ (x>0    ? xm*shared_u2[sm_xminus1][ty] : 0.0f)
+							+ (x<nx-1 ? xp*shared_u2[sm_xplus1][ty]  : 0.0f)
+							+ (y>0    ? ym*shared_u2[tx][sm_yminus1] : 0.0f)
+							+ (y<ny-1 ? yp*shared_u2[tx][sm_yplus1]  : 0.0f)
+							- sum * shared_u2[tx][ty];
+
+	}
 }
 
 /**
@@ -197,12 +504,175 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
  * @param red Parameter deciding whether the red or black fields of a
  * checkerboard pattern are being updated
  * @param pitchf1 Image pitch for single float images
- */__global__ void sorflow_nonlinear_warp_sor_shared(const float *bu_g,
-		const float *bv_g, const float *penaltyd_g, const float *penaltyr_g,
-		float *du_g, float *dv_g, int nx, int ny, float hx, float hy,
-		float lambda, float relaxation, int red, int pitchf1)
+ */__global__ void sorflow_nonlinear_warp_sor_shared (
+		const float *bu_g,			// right-hand side of lin. equations of horizontal flow
+		const float *bv_g,			// right-hand side of lin. equations of vertical flow
+		const float *penaltyd_g,	// data term penalty
+		const float *penaltyr_g,	// regularity term
+		float *du_g,				// horizontal flow increment
+		float *dv_g,				// vertical flow increment
+		int nx,						// image width	(= nx_fine)
+		int ny,						// image height (= ny_fine)
+		float hx,					// scale factor / pixel size in X direction
+		float hy,					// scale factor / pixel size in Y direction
+		float lambda,
+		float relaxation,			// overrelaxation value
+		int red,					// checkerboard flag
+		int pitchf1
+	)
 {
-	// ### Implement Me ###
+	// get thread coordinates and index
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const unsigned int idx = y * pitchf1 + x;
+
+	// get shared memory coordinates with border offset
+	const int tx = threadIdx.x + 1;
+	const int ty = threadIdx.y + 1;
+
+	//scale
+	const float hx_1 = 1.0f / (2.0f * hx);
+	const float hy_1 = 1.0f / (2.0f * hy);
+	const float hx_2 = lambda / (hx * hx);
+	const float hy_2 = lambda / (hy * hy);
+
+	//allocate shared memory blocks for regularity penalty and flow increment
+	__shared__ float shared_regPen[SF_BW + 2][SF_BH + 2];
+	__shared__ float shared_du1[SF_BW + 2][SF_BH + 2];
+	__shared__ float shared_du2[SF_BW + 2][SF_BH + 2];
+
+
+	if (x < nx && y < ny)
+	{
+		// load data into shared memory
+		shared_regPen[tx][ty] = penaltyr_g[idx];
+		shared_du1[tx][ty]    = du_g[idx];
+		shared_du2[tx][ty]    = dv_g[idx];
+
+		//left border
+		if (x == 0)
+		{
+			// left side of the image
+			shared_regPen[0][ty] = shared_regPen[tx][ty];
+			shared_du1[0][ty]    = shared_du1[tx][ty];
+			shared_du2[0][ty]    = shared_du2[tx][ty];
+		}
+		else if (threadIdx.x == 0)
+		{
+			// left side of the block
+			shared_regPen[0][ty] = penaltyr_g[idx - 1];
+			shared_du1[0][ty]    = du_g[idx - 1];
+			shared_du2[0][ty]    = dv_g[idx - 1];
+		}
+
+		//right border
+		if (x == nx - 1)
+		{
+			// right side of the image
+			shared_regPen[tx + 1][ty] = shared_regPen[tx][ty];
+			shared_du1[tx + 1][ty]    = shared_du1[tx][ty];
+			shared_du2[tx + 1][ty]    = shared_du2[tx][ty];
+		}
+		else if (threadIdx.x == SF_BW - 1)
+		{
+			// right side of the block
+			shared_regPen[tx + 1][ty] = penaltyr_g[idx + 1];
+			shared_du1[tx + 1][ty]    = du_g[idx + 1];
+			shared_du2[tx + 1][ty]    = dv_g[idx + 1];
+		}
+
+		//top border
+		if (y == 0)
+		{
+			// top side of the image
+			shared_regPen[tx][0] = shared_regPen[tx][ty];
+			shared_du1[tx][0]    = shared_du1[tx][ty];
+			shared_du2[tx][0]    = shared_du2[tx][ty];
+		}
+		else if (threadIdx.y == 0)
+		{
+			// top side of the block
+			shared_regPen[tx][0] = penaltyr_g[idx - pitchf1];
+			shared_du1[tx][0]    = du_g[idx - pitchf1];
+			shared_du2[tx][0]    = dv_g[idx - pitchf1];
+		}
+
+		//bikini bottom border
+		if (y == ny - 1)
+		{
+			// bottom side of the image
+			shared_regPen[tx][ty + 1] = shared_regPen[tx][ty];
+			shared_du1[tx][ty + 1]    = shared_du1[tx][ty];
+			shared_du2[tx][ty + 1]    = shared_du2[tx][ty];
+		}
+		else if (threadIdx.y == SF_BH - 1)
+		{
+			// bottom side of the block
+			shared_regPen[tx][ty + 1] = penaltyr_g[idx + pitchf1];
+			shared_du1[tx][ty + 1]    = du_g[idx + pitchf1];
+			shared_du2[tx][ty + 1]    = dv_g[idx + pitchf1];
+		}
+	}
+
+	__syncthreads();
+
+	if( x < nx && y < ny && ((x + y) & 1) == red ) // = ( (x + y) % 2 ) == red
+	{
+		// precalculate coordinates of surrounding pixels
+		unsigned int x_1 = x == 0      ? tx : tx - 1;
+		unsigned int x1  = x == nx - 1 ? tx : tx + 1;
+		unsigned int y_1 = y == 0      ? ty : ty - 1;
+		unsigned int y1  = y == ny - 1 ? ty : ty + 1;
+
+		//global texture indices
+		const float tx_x   = (float) x                           + SF_TEXTURE_OFFSET;
+		const float tx_x1  = (float) ((x == nx - 1) ? x : x + 1) + SF_TEXTURE_OFFSET;
+		const float tx_x_1 = (float) ((x == 0)      ? x : x - 1) + SF_TEXTURE_OFFSET;
+		const float tx_y   = (float) y                           + SF_TEXTURE_OFFSET;
+		const float tx_y1  = (float) ((y == ny - 1) ? y : y + 1) + SF_TEXTURE_OFFSET;
+		const float tx_y_1 = (float) ((y == 0)      ? y : y - 1) + SF_TEXTURE_OFFSET;
+
+		//calculate Ix, Iy
+		float Ix = 0.5f	* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
+						 - tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
+						 + tex2D(tex_flow_sor_I1, tx_x1, tx_y)
+						 - tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
+
+
+		float Iy = 0.5f * (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
+						 - tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
+						 + tex2D(tex_flow_sor_I1, tx_x, tx_y1)
+						 - tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
+
+
+		float xp = x < nx - 1 ? ( shared_regPen[x1][ty]  + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
+		float xm = x > 0      ? ( shared_regPen[x_1][ty] + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
+		float yp = y < ny - 1 ? ( shared_regPen[tx][y1]  + shared_regPen[tx][ty] ) * 0.5f * hy_2 : 0.0f;
+		float ym = y > 0      ? ( shared_regPen[tx][y_1] + shared_regPen[tx][ty] ) * 0.5f * hy_2 : 0.0f;
+		float sum = xp + xm + yp + ym;
+
+		float dataPenalty = penaltyd_g[idx];
+
+		float u1new  = (1.0f - relaxation) * shared_du1[tx][ty] + relaxation *
+				( bu_g[idx] - dataPenalty * Ix * Iy * shared_du2[tx][ty]
+				+ (x > 0      ? xm * shared_du1[x_1][ty] : 0.0f)
+				+ (x < nx - 1 ? xp * shared_du1[x1][ty]  : 0.0f)
+				+ (y > 0      ? ym * shared_du1[tx][y_1] : 0.0f)
+				+ (y < ny - 1 ? yp * shared_du1[tx][y1]  : 0.0f))
+				/ (dataPenalty * Ix * Ix + sum);
+
+		float u2new = (1.0f - relaxation) * shared_du2[tx][ty] + relaxation *
+				( bv_g[idx] - dataPenalty * Ix * Iy * shared_du1[tx][ty]
+				+ (x > 0      ? xm * shared_du2[x_1][ty] : 0.0f)
+				+ (x < nx - 1 ? xp * shared_du2[x1][ty]  : 0.0f)
+				+ (y > 0      ? ym * shared_du2[tx][y_1] : 0.0f)
+				+ (y < ny - 1 ? yp * shared_du2[tx][y1]  : 0.0f))
+				/ (dataPenalty * Iy * Iy + sum);
+
+		// update flow increment
+		du_g[idx] = u1new;
+		dv_g[idx] = u2new;
+	}
 }
 
 /**
@@ -242,27 +712,39 @@ void sorflow_gpu_nonlinear_warp_level(const float *u_g, const float *v_g,
 		float lambda, float overrelaxation, int outer_iterations,
 		int inner_iterations, float data_epsilon, float diff_epsilon)
 {
-	bool red = 0;
-
-	// grid and block dimensions
+// grid and block dimensions
 	int ngx = (nx % SF_BW) ? ((nx / SF_BW) + 1) : (nx / SF_BW);
 	int ngy = (ny % SF_BH) ? ((ny / SF_BH) + 1) : (ny / SF_BH);
 	dim3 dimGrid(ngx, ngy);
 	dim3 dimBlock(SF_BW, SF_BH);
+	bool red = 0;
 
 	for (int i = 0; i < outer_iterations; i++)
 	{
+		printf("lala\n");
 
-		//Update Robustifications
+		//robustifications
 		sorflow_update_robustifications_warp_tex_shared<<<dimGrid, dimBlock>>>(
 				u_g, v_g, du_g, dv_g, penaltyd_g, penaltyr_g, nx, ny, hx, hy,
 				data_epsilon, diff_epsilon, pitchf1);
-		//Update Righthand Side
+
+		 #ifdef DEBUG
+		 char* cudaDebug = "1_debug/penaltyd_g.png";
+		 showCudaImage(cudaDebug, penaltyd_g, nx, ny, pitchf1, 1);
+		 #endif
+
+		 #ifdef DEBUG
+		 cudaDebug = "1_debug/penaltyr_g.png";
+		 showCudaImage(cudaDebug, penaltyr_g, nx, ny, pitchf1, 1);
+		 #endif
+
+
+		//righthand side
 		sorflow_update_righthandside_shared<<<dimGrid, dimBlock>>>(u_g, v_g,
 				penaltyd_g, penaltyr_g, bu_g, bv_g, nx, ny, hx, hy, lambda,
 				pitchf1);
 
-		//
+		//sor interation
 		for (int j = 0; j < inner_iterations; j++)
 		{
 			red = 0;
@@ -274,7 +756,6 @@ void sorflow_gpu_nonlinear_warp_level(const float *u_g, const float *v_g,
 			sorflow_nonlinear_warp_sor_shared<<<dimGrid, dimBlock>>>(bu_g, bv_g,
 					penaltyd_g, penaltyr_g, du_g, dv_g, nx, ny, hx, hy, lambda,
 					overrelaxation, red, pitchf1);
-
 		}
 	}
 }
@@ -313,11 +794,11 @@ void sorflow_gpu_nonlinear_warp_level(const float *u_g, const float *v_g,
 
 float FlowLibGpuSOR::computeFlow()
 {
-	bool verbose = 1;
+	bool verbose = true;
 	// main algorithm goes here
-	if (verbose)
-		fprintf(stderr, "\computeFlowGPU\n");
+	if (verbose)fprintf(stderr, "\computeFlowGPU\n");
 
+	//the lambda
 	float lambda = _lambda * 255.0f;
 
 	//all per run variables goes here
@@ -334,27 +815,19 @@ float FlowLibGpuSOR::computeFlow()
 			((_start_level + 1) < warp_max_levels) ?
 					(_start_level + 1) : warp_max_levels) - 1;
 
-	//get max rec depth
+    //get max rec depth
 	if (max_rec_depth >= _I1pyramid->nl)
 		max_rec_depth = _I1pyramid->nl - 1;
 
-#ifdef DEBUG
-	printf("max_rec_depth=%d, warp_max_levels=%d\n", max_rec_depth,
-			warp_max_levels);
-#endif
 
-	// initial grid and block dimensions
+	if (verbose)fprintf(stderr,"\nmax_rec_depth=%d, warp_max_levels=%d",
+			max_rec_depth,warp_max_levels);
+
+	// initial grid and block dimensionslow  SOR
 	int initial_ngx = (_nx % SF_BW) ? ((_nx / SF_BW) + 1) : (_nx / SF_BW);
 	int initial_ngy = (_ny % SF_BH) ? ((_ny / SF_BH) + 1) : (_ny / SF_BH);
 	dim3 initial_dimGrid(initial_ngx, initial_ngy);
 	dim3 initial_dimBlock(SF_BW, SF_BH);
-
-	if (verbose)
-		fprintf(stderr, "\nInitializing _u1_g & _u2_g to black");
-
-	//set initial vector components to zero
-	for (unsigned int p = 0; p < _nx * _ny; p++)
-		_u1[p] = _u2[p] = 0.0f;
 
 	// initialize horizontal and vertical components of the flow
 	if (verbose)
@@ -363,43 +836,29 @@ float FlowLibGpuSOR::computeFlow()
 			_pitchf1, true);
 	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g, _nx, _ny,
 			_pitchf1, true);
-
-#ifdef DEBUG
-	char* cudaDebug = "1_debug/cu1lvl.png";
-	showCudaImage(cudaDebug, _u2_g, _nx, _ny, _pitchf1, 1);
-#endif
+	if (verbose)
+			fprintf(stderr, "\nInitialized _u1_g & _u2_g to black");
 
 	if (verbose)
-		fprintf(stderr, "\nInitializing coarse portion _u1_g & _u2_g to white");
-	// hardcoding parameters for nx & ny as dimension of lowest resolution
-	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u1_g, 9, 16,
-			_pitchf1, false);
-	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g, 9, 16,
-			_pitchf1, false);
+			fprintf(stderr, "\nRelaxation: %f\n", _overrelaxation);
 
-#ifdef DEBUG
-	cudaDebug = "2_debug/cu1lvl.png";
-	showCudaImage(cudaDebug, _u2_g, _nx, _ny, _pitchf1, 1);
-#endif
 
 	//////////////////////////////////////////////////////////////
 	// loop through image pyramide - main algorithm starts here //
 	//////////////////////////////////////////////////////////////
 	for (rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)
 	{
-		//all per interation variables goes here
+		//get image values for this interation
 		nx_fine = _I1pyramid->nx[rec_depth];
 		ny_fine = _I1pyramid->ny[rec_depth];
 
 		hx_fine = (float) _nx / (float) nx_fine;
 		hy_fine = (float) _ny / (float) ny_fine;
 
-#ifdef DEBUG
-		printf(
-				"level=%d, (rec_depth=%d) ===> nx_fine=%d, ny_fine=%d, nx_coarse=%d, ny_coarse=%d, hx_fine=%f, hy_fine=%f\n",
+		if (verbose)fprintf(stderr,
+				"\nlevel=%d, (rec_depth=%d) ===> nx_fine=%d, ny_fine=%d, nx_coarse=%d, ny_coarse=%d, hx_fine=%f, hy_fine=%f",
 				max_rec_depth - rec_depth, rec_depth, nx_fine, ny_fine,
 				nx_coarse, ny_coarse, hx_fine, hy_fine);
-#endif
 
 		// current grid and block dimensions
 		int ngx =
@@ -412,16 +871,19 @@ float FlowLibGpuSOR::computeFlow()
 		// resize flowfield to current level
 		if (rec_depth < max_rec_depth)
 		{
+			if (verbose)
+					fprintf(stderr, "\nResampling area starts");
 			resampleAreaParallelSeparate(_u1_g, _u1_g, nx_coarse, ny_coarse,
 					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
 					_I2pyramid->pitch[rec_depth], _b1);
 			resampleAreaParallelSeparate(_u2_g, _u2_g, nx_coarse, ny_coarse,
 					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
 					_I2pyramid->pitch[rec_depth], _b2);
+			if (verbose)
+					fprintf(stderr, "\nResampling area finish");
 		}
 
 		//bind resampled images
-		//TODO understand texture binding
 		int current_pitch = _I1pyramid->pitch[rec_depth];
 		bind_textures(_I1pyramid->level[rec_depth],
 				_I2pyramid->level[rec_depth], nx_fine, ny_fine, current_pitch);
@@ -432,11 +894,14 @@ float FlowLibGpuSOR::computeFlow()
 			backwardRegistrationBilinearFunctionGlobal(
 					_I2pyramid->level[rec_depth], _u1_g, _u2_g, _I2warp,
 					_I1pyramid->level[rec_depth], nx_fine, ny_fine,
-					_I2pyramid->pitch[rec_depth], current_pitch, hx_fine,
+					current_pitch, current_pitch, hx_fine,
 					hy_fine);
 
 			// synchronize threads
 			cutilSafeCall(cudaThreadSynchronize());
+
+			// update warped texture
+			update_textures_flow_sor(_I2warp, nx_fine, ny_fine, current_pitch);
 
 			//set du/dv to zero
 			initializeToZero<<<dimGrid, dimBlock>>>(_u1lvl, nx_fine, ny_fine,
@@ -446,13 +911,13 @@ float FlowLibGpuSOR::computeFlow()
 
 			// compute incremental update for this level // A*x = b
 			sorflow_gpu_nonlinear_warp_level(_u1_g, _u2_g, _u1lvl, _u2lvl, _b1,
-					_b2, _penDat, _penReg, nx_fine, ny_fine, _pitchf1, hx_fine,
+					_b2, _penDat, _penReg, nx_fine, ny_fine, current_pitch, hx_fine,
 					hy_fine, lambda, _overrelaxation, _oi, _ii, _dat_epsilon,
 					_reg_epsilon);
 
 			// add the flow fields
 			add_flow_fields<<<dimGrid, dimBlock>>>(_u1lvl, _u2lvl, _u1_g, _u2_g,
-					nx_fine, ny_fine, _pitchf1);
+					nx_fine, ny_fine, current_pitch);
 		}
 
 		nx_coarse = nx_fine;
@@ -461,11 +926,9 @@ float FlowLibGpuSOR::computeFlow()
 #ifdef DEBUG
 		printf("End of interation\n");
 #endif
+		unbind_textures_flow_sor();
 
 	}
-
-	unbind_textures_flow_sor();
 	return -1.0f;
-
 }
 

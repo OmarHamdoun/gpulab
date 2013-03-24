@@ -5,6 +5,7 @@
 default_target: all
 .PHONY : default_target
 
+#=============================================================================
 # Special targets provided by cmake.
 
 # Disable implicit rules so canonical targets will work.
