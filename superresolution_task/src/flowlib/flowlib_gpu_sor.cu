@@ -102,10 +102,10 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
  * @param nx Image width
  * @param ny Image height
  * @param pitchf1 Image pitch for single float images
- */__global__ void add_flow_fields(const float *du_g, const float *dv_g,
+ */
+__global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		float *u_g, float *v_g, int nx, int ny, int pitchf1)
 {
-	// ### Implement Me###
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -141,7 +141,8 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
  * @param diff_epsilon Smoothing parameter for the TV Penalization of the
  * regularity term
  * @param pitchf1 Image pitch for single float images
- */__global__ void sorflow_update_robustifications_warp_tex_shared(
+ */
+ __global__ void sorflow_update_robustifications_warp_tex_shared(
 		const float *u_g, const float *v_g, const float *du_g,
 		const float *dv_g, float *penaltyd_g, float *penaltyr_g, int nx, int ny,
 		float hx, float hy, float data_epsilon, float diff_epsilon, int pitchf1)
@@ -320,7 +321,8 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
  * @param hy Vertical pixel size
  * @param lambda Smoothness weight
  * @param pitchf1 Image pitch for single float images
- */__global__ void sorflow_update_righthandside_shared(const float *u_g,
+ */
+ __global__ void sorflow_update_righthandside_shared(const float *u_g,
 		const float *v_g, const float *penaltyd_g, const float *penaltyr_g,
 		float *bu_g, float *bv_g, int nx, int ny, float hx, float hy,
 		float lambda, int pitchf1)
@@ -414,6 +416,7 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			shared_penaltyr[tx][ty + 1] = penaltyr_g[idx + pitchf1];
 		}
 	}
+	
 	__syncthreads();
 
 	//then calculate righthand site
@@ -603,8 +606,7 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 
 	__syncthreads();
 
-	//if( x < nx && y < ny && ((x + y) & 1) == red ) // = ( (x + y) % 2 ) == red
-	if( x < nx && y < ny && ( (x + y) % 2 ) == red )
+	if( x < nx && y < ny && ((x + y) & 1) == red ) // = ( (x + y) % 2 ) == red
 	{
 		//scale
 		const float hx_1 = 1.0f / (2.0f * hx);
@@ -664,10 +666,6 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 		// update flow increment
 		du_g[idx] = u1new;
 		dv_g[idx] = u2new;
-
-		//printf("\nsor Cuda sor thread du_g[idx]=%f", du_g[idx]);
-		//printf("\n\nsor Cuda sor thread x: %i y: %i, Ix=%f,  Iy=%f, du_g[idx]= %f,dv_g[idx]= %f,xx = %f,yy = %f", x,y,Ix, Iy, du_g[idx],dv_g[idx],xx,yy);
-		//printf("\nsor Cuda sor thread x: %i y: %i, lala=%f,  hx=%f,  hx_1=%f, Ix=%f, du_g[idx]= %f,dv_g[idx]= %f", x,y,lala, hx, hx_1,Ix, du_g[idx],dv_g[idx]);
 	}
 }
 
@@ -708,62 +706,32 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 		float lambda, float overrelaxation, int outer_iterations,
 		int inner_iterations, float data_epsilon, float diff_epsilon)
 {
-// grid and block dimensions
+	// grid and block dimensions
 	int ngx = (nx % SF_BW) ? ((nx / SF_BW) + 1) : (nx / SF_BW);
 	int ngy = (ny % SF_BH) ? ((ny / SF_BH) + 1) : (ny / SF_BH);
 	dim3 dimGrid(ngx, ngy);
 	dim3 dimBlock(SF_BW, SF_BH);
 	bool red = 0;
 
-	//printKernel <<<dimGrid,dimBlock>>>(1,du_g, nx, ny, pitchf1, 0.0f);
-	//printKernel <<<dimGrid,dimBlock>>>(1,dv_g, nx, ny, pitchf1, 0.0f);
-
-	//for (int i = 0; i < 1; i++)
-	for (int i = 0; i < 20; i++)
+	for (int i = 0; i < outer_iterations; i++)
 	{
 
 		//robustifications
 		sorflow_update_robustifications_warp_tex_shared<<<dimGrid, dimBlock>>>(
 				u_g, v_g, du_g, dv_g, penaltyd_g, penaltyr_g, nx, ny, hx, hy,
 				data_epsilon, diff_epsilon, pitchf1);
-		catchkernel;
-
-		//printKernel <<<dimGrid,dimBlock>>>(i,penaltyd_g, nx, ny, pitchf1, 0.0f);
-			//printKernel <<<dimGrid,dimBlock>>>(1,dv_g, nx, ny, pitchf1, 0.0f);
-
-/*
-		 #ifdef DEBUG
-		   char* cudaDebug = "1_debug/penaltyd_g.png";
-		   showCudaImage(cudaDebug, penaltyd_g, nx, ny, pitchf1, 1);
-		 #endif
-
-		 #ifdef DEBUG
-		   cudaDebug = "1_debug/penaltyr_g.png";
-		   showCudaImage(cudaDebug, penaltyr_g, nx, ny, pitchf1, 1);
-		 #endif
-*/
+		
+		//catchkernel;
 
 		//righthand side
 		sorflow_update_righthandside_shared<<<dimGrid, dimBlock>>>(u_g, v_g,
 				penaltyd_g, penaltyr_g, bu_g, bv_g, nx, ny, hx, hy, lambda,
 				pitchf1);
-		catchkernel;
-
-		/*
-		#ifdef DEBUG
-			char* cudaDebug = "1_debug/bu_g.png";
-			showCudaImage(cudaDebug, bu_g, nx, ny, pitchf1, 1);
-		#endif
-
-		#ifdef DEBUG
-			cudaDebug = "1_debug/bv_g.png";
-			showCudaImage(cudaDebug, bv_g, nx, ny, pitchf1, 1);
-		#endif
-		*/
+		
+		//catchkernel;
 
 		//sor interation
 		for (int j = 0; j < inner_iterations; j++)
-		//for (int j = 0; j < 2; j++)
 		{
 			red = 0;
 			sorflow_nonlinear_warp_sor_shared<<<dimGrid, dimBlock>>>(i*j,bu_g, bv_g,
@@ -774,32 +742,14 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 			sorflow_nonlinear_warp_sor_shared<<<dimGrid, dimBlock>>>(i*j,bu_g, bv_g,
 					penaltyd_g, penaltyr_g, du_g, dv_g, nx, ny, hx, hy, lambda,
 					overrelaxation, red, pitchf1);
-
-			/*
-			#ifdef DEBUG
-				char* cudaDebug = "1_debug/du_g.png";
-				showCudaImage(cudaDebug, du_g, nx, ny, pitchf1, 1);
-			#endif
-
-			#ifdef DEBUG
-				cudaDebug = "1_debug/dv_g.png";
-				showCudaImage(cudaDebug, dv_g, nx, ny, pitchf1, 1);
-			#endif
-			*/
-
 		}
-
-		//printKernel <<<dimGrid,dimBlock>>>(i,du_g, nx, ny, pitchf1, 0.0f);
 	}
-
-	//printKernel <<<dimGrid,dimBlock>>>(2,du_g, nx, ny, pitchf1, 0.0f);
-	//printKernel <<<dimGrid,dimBlock>>>(2,dv_g, nx, ny, pitchf1, 0.0f);
-
 }
 
 /*
  * Initializes an float array to zero
- */__global__ void initializeToZero(float* array, int width, int height,
+ */
+__global__ void initializeToZero(float* array, int width, int height,
 		int pitch, bool black)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -816,7 +766,8 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 
 /*
  * Initializes two similar float arrays to zero
- */__global__ void initializeTwoToZero(float* array1, float* array2, int width,
+ */
+__global__ void initializeTwoToZero(float* array1, float* array2, int width,
 		int height, int pitch)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -831,9 +782,8 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 
 float FlowLibGpuSOR::computeFlow()
 {
-	//cudaPrintfInit();
-
 	bool verbose = true;
+	
 	// main algorithm goes here
 	if (verbose)fprintf(stderr, "\computeFlowGPU");
 
@@ -841,14 +791,15 @@ float FlowLibGpuSOR::computeFlow()
 	float lambda = _lambda * 255.0f;
 
 	//all per run variables goes here
-	int max_rec_depth;/*maximal depth*/
-	int warp_max_levels;/*maximal warp levels*/
-	int rec_depth;/*actual depth*/
+	int max_rec_depth; 		// maximal depth
+	int warp_max_levels; 	// maximal warp levels
+	int rec_depth; 			// actual depth
 	float hx_fine, hy_fine;
 	unsigned int nx_fine, ny_fine, nx_coarse = 0, ny_coarse = 0;
 
 	//get max warp levels
 	warp_max_levels = computeMaxWarpLevels();
+	
 	//get max rec depth
 	max_rec_depth = (
 			((_start_level + 1) < warp_max_levels) ?
@@ -887,8 +838,6 @@ float FlowLibGpuSOR::computeFlow()
 	//////////////////////////////////////////////////////////////
 	for (rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)
 	{
-       // rec_depth = 0;
-
 		if (verbose)fprintf(stderr,
 						"\n\nStart interation");
 
