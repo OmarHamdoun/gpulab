@@ -90,8 +90,6 @@ __global__ void backwardRegistrationBilinearFunctionGlobalGpu(const float *in_g,
 	// check if x is within the boundaries
 	if (x < nx && y < ny)
 	{
-		//printf("\nwarping thread x: %i y: %i, flow1_g[idx]= %f,flow2_g[idx]= %f", x,y, flow1_g[y * pitchf1_in + x],flow2_g[y * pitchf1_in + x]);
-
 		const float xx = (float) x + flow1_g[y * pitchf1_in + x] / hx;
 		const float yy = (float) y + flow2_g[y * pitchf1_in + x] / hy;
 
@@ -372,7 +370,7 @@ void resampleAreaParallelSeparate(const float *in_g, float *out_g, int nx_in,
 
 	if (help_g == 0)
 	{
-		fprintf(stderr, "\nno helper array!");
+		fprintf(stderr, "\nERROR: no helper array for resamling!");
 		return;
 	}
 
@@ -450,22 +448,6 @@ __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
 	if (x < nx && y < ny)
 	{
 		field_g[idx] = value;
-		//printf("\nsetKernel cuda thread x: %i y: %i, field_g[idx]= %f",
-		//						x,y, field_g[idx]);
-	}
-}
-
-__global__ void printKernel(int i, float *field_g, int nx, int ny, int pitchf1,
-		float value)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-	const int idx = y * pitchf1 + x;
-	if (x < nx && y < ny)
-	{
-		printf(
-				"\n printKernel cuda thread call:%i x: %i y: %i, field_g[idx]= %f",
-				i, x, y, field_g[idx]);
 	}
 }
 
