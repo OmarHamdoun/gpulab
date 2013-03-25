@@ -19,7 +19,7 @@
 				</extensions>
 			</storageModule>
 			<storageModule moduleId="cdtBuildSystem" version="4.0.0">
-				<configuration buildProperties="" description="" id="com.nvidia.cuda.ide.toolchain.base.1034358479" name="Default" parent="org.eclipse.cdt.build.core.emptycfg">
+				<configuration artifactName="superresolution_task" buildProperties="" description="" id="com.nvidia.cuda.ide.toolchain.base.1034358479" name="Default" parent="org.eclipse.cdt.build.core.emptycfg">
 					<folderInfo id="com.nvidia.cuda.ide.toolchain.base.1034358479.370483825" name="/" resourcePath="">
 						<toolChain id="com.nvidia.cuda.ide.toolchain.base.845270256" name="com.nvidia.cuda.ide.toolchain.base" superClass="com.nvidia.cuda.ide.toolchain.base">
 							<targetPlatform archList="all" binaryParser="com.nvidia.cuda.ide.elf;com.nvidia.cuda.ide.macho;com.nvidia.cuda.ide.cubin" id="com.nvidia.cuda.ide.targetPlatform.903685678" isAbstract="false" name="Debug Platform" osList="linux,macosx" superClass="com.nvidia.cuda.ide.targetPlatform"/>
@@ -42,6 +42,13 @@
 							</tool>
 						</toolChain>
 					</folderInfo>
+					<fileInfo id="com.nvidia.cuda.ide.toolchain.base.1034358479.984861252" name="flowlib_gpu_sor.cu" rcbsApplicability="disable" resourcePath="src/flowlib/flowlib_gpu_sor.cu" toolsToInvoke="nvcc.compiler.base.626878144.686857261">
+						<tool id="nvcc.compiler.base.626878144.686857261" name="NVCC Compiler" superClass="nvcc.compiler.base.626878144">
+							<inputType id="nvcc.compiler.input.cu.855718096" superClass="nvcc.compiler.input.cu"/>
+							<inputType id="nvcc.compiler.input.cpp.759497022" superClass="nvcc.compiler.input.cpp"/>
+							<inputType id="nvcc.compiler.input.c.1280268603" superClass="nvcc.compiler.input.c"/>
+						</tool>
+					</fileInfo>
 				</configuration>
 			</storageModule>
 			<storageModule moduleId="com.nvidia.cuda.ide.build.project.ICudaProjectConfiguration"/>
@@ -51,10 +58,28 @@
 	<storageModule moduleId="cdtBuildSystem" version="4.0.0">
 		<project id="superresolution_task.null.1256421264" name="superresolution_task"/>
 	</storageModule>
-	<storageModule moduleId="scannerConfiguration">
-		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
-	</storageModule>
 	<storageModule moduleId="refreshScope" versionNumber="1">
 		<resource resourceType="PROJECT" workspacePath="/superresolution_task"/>
+	</storageModule>
+	<storageModule moduleId="scannerConfiguration">
+		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
+		<scannerConfigBuildInfo instanceId="com.nvidia.cuda.ide.toolchain.base.1034358479;com.nvidia.cuda.ide.toolchain.base.1034358479.370483825;nvcc.compiler.base.626878144;nvcc.compiler.input.cpp.214925300">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="com.nvidia.cuda.ide.build.NVCCPerProjectProfile"/>
+		</scannerConfigBuildInfo>
+		<scannerConfigBuildInfo instanceId="com.nvidia.cuda.ide.toolchain.base.1034358479;com.nvidia.cuda.ide.toolchain.base.1034358479.984861252;nvcc.compiler.base.626878144.686857261;nvcc.compiler.input.cpp.759497022">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="com.nvidia.cuda.ide.build.NVCCPerProjectProfile"/>
+		</scannerConfigBuildInfo>
+		<scannerConfigBuildInfo instanceId="com.nvidia.cuda.ide.toolchain.base.1034358479;com.nvidia.cuda.ide.toolchain.base.1034358479.984861252;nvcc.compiler.base.626878144.686857261;nvcc.compiler.input.cu.855718096">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="com.nvidia.cuda.ide.build.NVCCPerProjectProfile"/>
+		</scannerConfigBuildInfo>
+		<scannerConfigBuildInfo instanceId="com.nvidia.cuda.ide.toolchain.base.1034358479;com.nvidia.cuda.ide.toolchain.base.1034358479.984861252;nvcc.compiler.base.626878144.686857261;nvcc.compiler.input.c.1280268603">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="com.nvidia.cuda.ide.build.NVCCPerProjectProfile"/>
+		</scannerConfigBuildInfo>
+		<scannerConfigBuildInfo instanceId="com.nvidia.cuda.ide.toolchain.base.1034358479;com.nvidia.cuda.ide.toolchain.base.1034358479.370483825;nvcc.compiler.base.626878144;nvcc.compiler.input.c.229009772">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="com.nvidia.cuda.ide.build.NVCCPerProjectProfile"/>
+		</scannerConfigBuildInfo>
+		<scannerConfigBuildInfo instanceId="com.nvidia.cuda.ide.toolchain.base.1034358479;com.nvidia.cuda.ide.toolchain.base.1034358479.370483825;nvcc.compiler.base.626878144;nvcc.compiler.input.cu.156482748">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="com.nvidia.cuda.ide.build.NVCCPerProjectProfile"/>
+		</scannerConfigBuildInfo>
 	</storageModule>
 </cproject>

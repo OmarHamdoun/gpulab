@@ -69,7 +69,7 @@ set(generated_file_internal "/home/philipp/entw/gpulab/superresolution_task/CMak
 set(generated_cubin_file_internal "/home/philipp/entw/gpulab/superresolution_task/CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o.cubin.txt") # path
 
 set(CUDA_NVCC_EXECUTABLE "/usr/local/cuda/bin/nvcc") # path
-set(CUDA_NVCC_FLAGS  ;; --ptxas-options=-v;-DUNIX;-arch;sm_11) # list
+set(CUDA_NVCC_FLAGS  ;; --ptxas-options=-v;-DUNIX;-arch;sm_20) # list
 # Build specific configuration flags
 set(CUDA_NVCC_FLAGS_DEBUG  ;; )
 set(CUDA_NVCC_FLAGS_MINSIZEREL  ;; )

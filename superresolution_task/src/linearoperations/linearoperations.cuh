@@ -280,6 +280,19 @@ __global__ void setKernel
 		int   pitchf1,
 		float value
 );
+
+__global__ void printKernel
+(
+		int i,
+		float *field_g,
+		int   nx,
+		int   ny,
+		int   pitchf1,
+		float value
+);
+
+
+
 #endif
 
 

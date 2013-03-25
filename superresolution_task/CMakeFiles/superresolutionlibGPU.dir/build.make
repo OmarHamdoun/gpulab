@@ -55,6 +55,7 @@ CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: src/superresolution/superresolution_definitions.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/include/_G_config.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/include/alloca.h
+CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/include/assert.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/include/c++/4.6/backward/binders.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/include/c++/4.6/bits/allocator.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/include/c++/4.6/bits/basic_string.h
@@ -195,7 +196,7 @@ CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/host_config.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/host_defines.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/math_functions.h
-CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/math_functions_dbl_ptx1.h
+CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/math_functions_dbl_ptx3.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/sm_11_atomic_functions.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/sm_12_atomic_functions.h
 CMakeFiles/superresolutionlibGPU.dir/src/superresolution/./superresolutionlibGPU_generated_superresolution.cu.o: /usr/local/cuda/include/sm_13_double_functions.h

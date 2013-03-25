@@ -50,6 +50,7 @@ CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: src/auxiliary/cuda_basic.cuh
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/include/_G_config.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/include/alloca.h
+CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/include/assert.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/include/c++/4.6/backward/binders.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/include/c++/4.6/bits/allocator.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/include/c++/4.6/bits/basic_string.h
@@ -181,7 +182,7 @@ CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/host_config.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/host_defines.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/math_functions.h
-CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/math_functions_dbl_ptx1.h
+CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/math_functions_dbl_ptx3.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/sm_11_atomic_functions.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/sm_12_atomic_functions.h
 CMakeFiles/auxiliaryGPU.dir/src/auxiliary/./auxiliaryGPU_generated_cuda_basic.cu.o: /usr/local/cuda/include/sm_13_double_functions.h

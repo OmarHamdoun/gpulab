@@ -73,7 +73,7 @@ float FlowLibCpuSOR::computeFlow()
   	_u1[p] = _u2[p] = 0.0f;
   }
 
-	for(rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)	{
+	for(rec_depth = max_rec_depth; rec_depth >= max_rec_depth; rec_depth--)	{
 
 		if(_verbose) fprintf(stderr," Level %i",rec_depth);
 
@@ -94,6 +94,13 @@ float FlowLibCpuSOR::computeFlow()
 			sprintf(_debugbuffer,"debug/CI2 %i.png",rec_depth);
 			saveFloatImage(_debugbuffer,_I2pyramid->level[rec_depth],nx_fine,ny_fine,1,1.0f,-1.0f);
 		}
+
+		 char* cudaDebug = "1_debug/image1.png";
+		 showFloatImage("cudaDebug", _I1pyramid->level[rec_depth], nx_fine, ny_fine,1, 1);
+
+		 cudaDebug = "1_debug/image2.png";
+		 showFloatImage("cudaDebug", _I2pyramid->level[rec_depth], nx_fine, ny_fine, 1, 1);
+
 
 		if(rec_depth < max_rec_depth)	{
 			resampleAreaParallelizableSeparate(_u1,_u1,nx_coarse,ny_coarse,nx_fine,ny_fine,_b1);
