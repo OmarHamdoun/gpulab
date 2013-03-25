@@ -294,7 +294,7 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 
 		double dataterm = shared_du1[tx][ty] * Ix + shared_du2[tx][ty] * Iy
 				+ It;
-
+		
 		//calculate penalty terms
 		penaltyd_g[idx] = 1.0f/sqrt(dataterm * dataterm + data_epsilon);
 		penaltyr_g[idx] = 1.0f/sqrt(
@@ -348,7 +348,6 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 		// setup shared memory
 		shared_u1[tx][ty]       = u_g[idx];
 		shared_u2[tx][ty]       = v_g[idx];
-		shared_penaltyd[tx][ty] = penaltyd_g[idx];
 		shared_penaltyr[tx][ty] = penaltyr_g[idx];
 
 		//left border
@@ -357,7 +356,6 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			// left side of the image
 			shared_u1[0][ty]       = shared_u1[tx][ty];
 			shared_u2[0][ty]       = shared_u2[tx][ty];
-			shared_penaltyd[0][ty] = shared_penaltyd[tx][ty];
 			shared_penaltyr[0][ty] = shared_penaltyr[tx][ty];
 		}
 		else if (threadIdx.x == 0)
@@ -365,7 +363,6 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			// left side of the block
 			shared_u1[0][ty]       = u_g[idx - 1];
 			shared_u2[0][ty]       = v_g[idx - 1];
-			shared_penaltyd[0][ty] = penaltyd_g[idx - 1];
 			shared_penaltyr[0][ty] = penaltyr_g[idx - 1];
 		}
 
@@ -375,7 +372,6 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			// right side of the image
 			shared_u1[tx + 1][ty]       = shared_u1[tx][ty];
 			shared_u2[tx + 1][ty]       = shared_u2[tx][ty];
-			shared_penaltyd[tx + 1][ty] = shared_penaltyd[tx][ty];
 			shared_penaltyr[tx + 1][ty] = shared_penaltyr[tx][ty];
 		}
 		else if (threadIdx.x == SF_BW - 1)
@@ -383,8 +379,7 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			// right side of the block
 			shared_u1[tx + 1][ty]       = u_g[idx + 1];
 			shared_u2[tx + 1][ty]       = v_g[idx + 1];
-			shared_penaltyd[tx + 1][ty] = penaltyd_g[idx + 1];
-			shared_penaltyd[tx + 1][ty] = penaltyr_g[idx + 1];
+			shared_penaltyr[tx + 1][ty] = penaltyr_g[idx + 1];
 		}
 
 		//top border
@@ -393,16 +388,14 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			// top side of the image
 			shared_u1[tx][0]       = shared_u1[tx][ty];
 			shared_u2[tx][0]       = shared_u2[tx][ty];
-			shared_penaltyd[tx][0] = shared_penaltyd[tx][ty];
-			shared_penaltyd[tx][0] = shared_penaltyd[tx][ty];
+			shared_penaltyr[tx][0] = shared_penaltyr[tx][ty];
 		}
 		else if (threadIdx.y == 0)
 		{
 			// top side of the block
 			shared_u1[tx][0]       = u_g[idx - pitchf1];
 			shared_u2[tx][0]       = v_g[idx - pitchf1];
-			shared_penaltyd[tx][0] = penaltyd_g[idx - pitchf1];
-			shared_penaltyd[tx][0] = penaltyr_g[idx - pitchf1];
+			shared_penaltyr[tx][0] = penaltyr_g[idx - pitchf1];
 		}
 
 		//bikini bottom border
@@ -411,16 +404,14 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 			// bottom side of the image
 			shared_u1[tx][ty + 1]       = shared_u1[tx][ty];
 			shared_u2[tx][ty + 1]       = shared_u2[tx][ty];
-			shared_penaltyd[tx][ty + 1] = shared_penaltyd[tx][ty];
-			shared_penaltyd[tx][ty + 1] = shared_penaltyd[tx][ty];
+			shared_penaltyr[tx][ty + 1] = shared_penaltyr[tx][ty];
 		}
 		else if (threadIdx.y == SF_BH - 1)
 		{
 			// bottom side of the block
 			shared_u1[tx][ty + 1]       = u_g[idx + pitchf1];
 			shared_u2[tx][ty + 1]       = v_g[idx + pitchf1];
-			shared_penaltyd[tx][ty + 1] = penaltyd_g[idx + pitchf1];
-			shared_penaltyd[tx][ty + 1] = penaltyr_g[idx + pitchf1];
+			shared_penaltyr[tx][ty + 1] = penaltyr_g[idx + pitchf1];
 		}
 	}
 	__syncthreads();
@@ -429,9 +420,9 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 	if (x < nx && y < ny)
 	{
 		// local sm indices
-		unsigned int sm_xminus1 = x == 0 ? tx : tx - 1;
+		unsigned int sm_xminus1 = x == 0      ? tx : tx - 1;
 		unsigned int sm_xplus1  = x == nx - 1 ? tx : tx + 1;
-		unsigned int sm_yminus1 = y == 0 ? ty : ty - 1;
+		unsigned int sm_yminus1 = y == 0      ? ty : ty - 1;
 		unsigned int sm_yplus1  = y == ny - 1 ? ty : ty + 1;
 
 		//global indices
@@ -445,40 +436,40 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 		//calculate Ix, Iy, It
 		float Ix = 0.5f
 				* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
-						- tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
-						+ tex2D(tex_flow_sor_I1, tx_x1, tx_y)
-						- tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
+				 - tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
+				 + tex2D(tex_flow_sor_I1, tx_x1, tx_y)
+				 - tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
 
 		float Iy = 0.5f
 				* (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
-						- tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
-						+ tex2D(tex_flow_sor_I1, tx_x, tx_y1)
-						- tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
+				 - tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
+				 + tex2D(tex_flow_sor_I1, tx_x, tx_y1)
+				 - tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
 
 		float It = tex2D(tex_flow_sor_I2, tx_x, tx_y)
-				  - tex2D(tex_flow_sor_I1, tx_x, tx_y);
-
-		float xp = x<nx-1 ? (shared_penaltyr[sm_xplus1][ty]  + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
-		float xm = x>0    ? (shared_penaltyr[sm_xminus1][ty] + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
-		float yp = y<ny-1 ? (shared_penaltyr[tx][sm_yplus1]  + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
-		float ym = y>0    ? (shared_penaltyr[tx][sm_yminus1] + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
+				 - tex2D(tex_flow_sor_I1, tx_x, tx_y);
+		
+		float xp = x < nx-1 ? (shared_penaltyr[sm_xplus1][ty]  + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
+		float xm = x > 0    ? (shared_penaltyr[sm_xminus1][ty] + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
+		float yp = y < ny-1 ? (shared_penaltyr[tx][sm_yplus1]  + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
+		float ym = y > 0    ? (shared_penaltyr[tx][sm_yminus1] + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
+		
 		//sum up elements
 		float sum = xp + xm + yp + ym;
 
-		bu_g[idx] = -shared_penaltyd[tx][ty] * Ix*It
-							+ (x>0    ? xm*shared_u1[sm_xminus1][ty] : 0.0f)
-							+ (x<nx-1 ? xp*shared_u1[sm_xplus1][ty]  : 0.0f)
-							+ (y>0    ? ym*shared_u1[tx][sm_yminus1] : 0.0f)
-							+ (y<ny-1 ? yp*shared_u1[tx][sm_yplus1]  : 0.0f)
+		bu_g[idx] = -penaltyd_g[idx] * Ix*It
+							+ (x>0    ? xm * shared_u1[sm_xminus1][ty] : 0.0f)
+							+ (x<nx-1 ? xp * shared_u1[sm_xplus1][ty]  : 0.0f)
+							+ (y>0    ? ym * shared_u1[tx][sm_yminus1] : 0.0f)
+							+ (y<ny-1 ? yp * shared_u1[tx][sm_yplus1]  : 0.0f)
 							- sum * shared_u1[tx][ty];
 
-		bv_g[idx] = -shared_penaltyd[tx][ty] * Iy*It
-							+ (x>0    ? xm*shared_u2[sm_xminus1][ty] : 0.0f)
-							+ (x<nx-1 ? xp*shared_u2[sm_xplus1][ty]  : 0.0f)
-							+ (y>0    ? ym*shared_u2[tx][sm_yminus1] : 0.0f)
-							+ (y<ny-1 ? yp*shared_u2[tx][sm_yplus1]  : 0.0f)
+		bv_g[idx] = -penaltyd_g[idx] * Iy*It
+							+ (x>0    ? xm * shared_u2[sm_xminus1][ty] : 0.0f)
+							+ (x<nx-1 ? xp * shared_u2[sm_xplus1][ty]  : 0.0f)
+							+ (y>0    ? ym * shared_u2[tx][sm_yminus1] : 0.0f)
+							+ (y<ny-1 ? yp * shared_u2[tx][sm_yplus1]  : 0.0f)
 							- sum * shared_u2[tx][ty];
-
 	}
 }
 
@@ -621,9 +612,6 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 		const float hx_2 = lambda / (hx * hx);
 		const float hy_2 = lambda / (hy * hy);
 
-		//printf("\nsor Cuda sor thread inter= %i, x: %i y: %i, hx=%f,  hy=%f, hx_2=%f,  hy_2=%f,  lamda=%f",i, x,y,hx, hy,hx_2, hy_2, lambda);
-		//printf("\nsor Cuda sor thread lamda=%f", lambda);
-
 		// precalculate coordinates of surrounding pixels
 		unsigned int x_1 = x == 0      ? tx : tx - 1;
 		unsigned int x1  = x == nx - 1 ? tx : tx + 1;
@@ -648,39 +636,13 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 						  + tex2D(tex_flow_sor_I1, xx, yy + 1)
 						  - tex2D(tex_flow_sor_I1, xx, yy - 1)) * hy_1;
 
-		/*		//global texture indices
-		const float tx_x   = (float) x                           + SF_TEXTURE_OFFSET;
-		const float tx_x1  = (float) ((x == nx - 1) ? x : x + 1) + SF_TEXTURE_OFFSET;
-		const float tx_x_1 = (float) ((x == 0)      ? x : x - 1) + SF_TEXTURE_OFFSET;
-		const float tx_y   = (float) y                           + SF_TEXTURE_OFFSET;
-		const float tx_y1  = (float) ((y == ny - 1) ? y : y + 1) + SF_TEXTURE_OFFSET;
-		const float tx_y_1 = (float) ((y == 0)      ? y : y - 1) + SF_TEXTURE_OFFSET;
-
-		//calculate Ix, Iy
-		float Ix = 0.5f	* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
-						 - tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
-						 + tex2D(tex_flow_sor_I1, tx_x1, tx_y)
-						 - tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
-
-
-		float Iy = 0.5f * (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
-						 - tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
-						 + tex2D(tex_flow_sor_I1, tx_x, tx_y1)
-						 - tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;*/
-
-
-
-
+		
 		float xp = x < nx - 1 ? ( shared_regPen[x1][ty]  + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
 		float xm = x > 0      ? ( shared_regPen[x_1][ty] + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
 		float yp = y < ny - 1 ? ( shared_regPen[tx][y1]  + shared_regPen[tx][ty] ) * 0.5f * hy_2 : 0.0f;
 		float ym = y > 0      ? ( shared_regPen[tx][y_1] + shared_regPen[tx][ty] ) * 0.5f * hy_2 : 0.0f;
 		float sum = xp + xm + yp + ym;
-
-		//printf("\nsor inter=%i ,x: %i y: %i, xp=%f,  xm=%f,  yp=%f, ym=%f, ym=%f, hx_2=%f, hx=%f, lamda=%f", i,x,y,xp, xm, yp,ym,hx_2,hx,lambda);
-		//printf("\nsor shared x: %i y: %i shared:%f",x,y, shared_regPen[tx][y1]);
-		//printf("\nsor sor x: %i y: %i sum:%f",x,y, sum);
-
+		
 		float dataPenalty = penaltyd_g[idx];
 
 		float u1new  = (1.0f - relaxation) * shared_du1[tx][ty] + relaxation *
@@ -698,7 +660,7 @@ void update_textures_flow_sor(const float *I2_resampled_warped_g, int nx_fine,
 				+ (y > 0      ? ym * shared_du2[tx][y_1] : 0.0f)
 				+ (y < ny - 1 ? yp * shared_du2[tx][y1]  : 0.0f))
 				/ (dataPenalty * Iy * Iy + sum);
-
+		
 		// update flow increment
 		du_g[idx] = u1new;
 		dv_g[idx] = u2new;

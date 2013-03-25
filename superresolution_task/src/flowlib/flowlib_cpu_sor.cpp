@@ -73,7 +73,7 @@ float FlowLibCpuSOR::computeFlow()
   	_u1[p] = _u2[p] = 0.0f;
   }
 
-	for(rec_depth = max_rec_depth; rec_depth >= max_rec_depth; rec_depth--)	{
+	for(rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)	{
 
 		if(_verbose) fprintf(stderr," Level %i",rec_depth);
 
