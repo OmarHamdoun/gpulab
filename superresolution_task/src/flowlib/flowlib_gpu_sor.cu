@@ -869,14 +869,12 @@ float FlowLibGpuSOR::computeFlow()
 			update_textures_flow_sor(_I2warp, nx_fine, ny_fine, current_pitch);
 
 			//set du/dv to zero
-			initializeToZero<<<dimGrid, dimBlock>>>(_u1lvl, nx_fine, ny_fine,
-					current_pitch, true);
-			initializeToZero<<<dimGrid, dimBlock>>>(_u2lvl, nx_fine, ny_fine,
-					current_pitch, true);
+			setKernel <<<dimGrid, dimBlock>>>( _u1lvl, nx_fine, ny_fine, current_pitch, 0.0f );
+			setKernel <<<dimGrid, dimBlock>>>( _u2lvl, nx_fine, ny_fine, current_pitch, 0.0f );
 
 			//set du/dv to zero
-			setKernel <<<dimGrid,dimBlock>>>(_u1lvl, nx_fine, ny_fine, current_pitch, 0.0f);
-			setKernel <<<dimGrid,dimBlock>>>(_u2lvl, nx_fine, ny_fine, current_pitch, 0.0f);
+			setKernel <<<dimGrid, dimBlock>>>( _u1lvl, nx_fine, ny_fine, current_pitch, 0.0f );
+			setKernel <<<dimGrid, dimBlock>>>( _u2lvl, nx_fine, ny_fine, current_pitch, 0.0f );
 
 			// compute incremental update for this level // A*x = b
 			sorflow_gpu_nonlinear_warp_level("1",_u1_g, _u2_g, _u1lvl, _u2lvl, _b1,
