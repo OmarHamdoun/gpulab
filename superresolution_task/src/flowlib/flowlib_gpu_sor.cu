@@ -168,8 +168,8 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 	if (x < nx && y < ny)
 	{
 		// setup shared memory
-		shared_u1[tx][ty] = u_g[idx];
-		shared_u2[tx][ty] = v_g[idx];
+		shared_u1[tx][ty]  = u_g[idx];
+		shared_u2[tx][ty]  = v_g[idx];
 		shared_du1[tx][ty] = du_g[idx];
 		shared_du2[tx][ty] = dv_g[idx];
 
@@ -177,16 +177,16 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		if (x == 0)
 		{
 			// left side of the image
-			shared_u1[0][ty] = shared_u1[tx][ty];
-			shared_u2[0][ty] = shared_u2[tx][ty];
+			shared_u1[0][ty]  = shared_u1[tx][ty];
+			shared_u2[0][ty]  = shared_u2[tx][ty];
 			shared_du1[0][ty] = shared_du1[tx][ty];
 			shared_du2[0][ty] = shared_du2[tx][ty];
 		}
 		else if (threadIdx.x == 0)
 		{
 			// left side of the block
-			shared_u1[0][ty] = u_g[idx - 1];
-			shared_u2[0][ty] = v_g[idx - 1];
+			shared_u1[0][ty]  = u_g[idx - 1];
+			shared_u2[0][ty]  = v_g[idx - 1];
 			shared_du1[0][ty] = du_g[idx - 1];
 			shared_du2[0][ty] = dv_g[idx - 1];
 		}
@@ -195,16 +195,16 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		if (x == nx - 1)
 		{
 			// right side of the image
-			shared_u1[tx + 1][ty] = shared_u1[tx][ty];
-			shared_u2[tx + 1][ty] = shared_u2[tx][ty];
+			shared_u1[tx + 1][ty]  = shared_u1[tx][ty];
+			shared_u2[tx + 1][ty]  = shared_u2[tx][ty];
 			shared_du1[tx + 1][ty] = shared_du1[tx][ty];
 			shared_du2[tx + 1][ty] = shared_du2[tx][ty];
 		}
 		else if (threadIdx.x == SF_BW - 1)
 		{
 			// right side of the block
-			shared_u1[tx + 1][ty] = u_g[idx + 1];
-			shared_u2[tx + 1][ty] = v_g[idx + 1];
+			shared_u1[tx + 1][ty]  = u_g[idx + 1];
+			shared_u2[tx + 1][ty]  = v_g[idx + 1];
 			shared_du1[tx + 1][ty] = du_g[idx + 1];
 			shared_du2[tx + 1][ty] = dv_g[idx + 1];
 		}
@@ -213,16 +213,16 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		if (y == 0)
 		{
 			// top side of the image
-			shared_u1[tx][0] = shared_u1[tx][ty];
-			shared_u2[tx][0] = shared_u2[tx][ty];
+			shared_u1[tx][0]  = shared_u1[tx][ty];
+			shared_u2[tx][0]  = shared_u2[tx][ty];
 			shared_du1[tx][0] = shared_du1[tx][ty];
 			shared_du2[tx][0] = shared_du2[tx][ty];
 		}
 		else if (threadIdx.y == 0)
 		{
 			// top side of the block
-			shared_u1[tx][0] = u_g[idx - pitchf1];
-			shared_u2[tx][0] = v_g[idx - pitchf1];
+			shared_u1[tx][0]  = u_g[idx - pitchf1];
+			shared_u2[tx][0]  = v_g[idx - pitchf1];
 			shared_du1[tx][0] = du_g[idx - pitchf1];
 			shared_du2[tx][0] = dv_g[idx - pitchf1];
 		}
@@ -231,16 +231,16 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		if (y == ny - 1)
 		{
 			// bottom side of the image
-			shared_u1[tx][ty + 1] = shared_u1[tx][ty];
-			shared_u2[tx][ty + 1] = shared_u2[tx][ty];
+			shared_u1[tx][ty + 1]  = shared_u1[tx][ty];
+			shared_u2[tx][ty + 1]  = shared_u2[tx][ty];
 			shared_du1[tx][ty + 1] = shared_du1[tx][ty];
 			shared_du2[tx][ty + 1] = shared_du2[tx][ty];
 		}
 		else if (threadIdx.y == SF_BH - 1)
 		{
 			// bottom side of the block
-			shared_u1[tx][ty + 1] = u_g[idx + pitchf1];
-			shared_u2[tx][ty + 1] = v_g[idx + pitchf1];
+			shared_u1[tx][ty + 1]  = u_g[idx + pitchf1];
+			shared_u2[tx][ty + 1]  = v_g[idx + pitchf1];
 			shared_du1[tx][ty + 1] = du_g[idx + pitchf1];
 			shared_du2[tx][ty + 1] = dv_g[idx + pitchf1];
 		}
@@ -251,55 +251,48 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 	if (x < nx && y < ny)
 	{
 		// local sm indices
-		unsigned int sm_xminus1 = x == 0 ? tx : tx - 1;
-		unsigned int sm_xplus1 = x == nx - 1 ? tx : tx + 1;
-		unsigned int sm_yminus1 = y == 0 ? ty : ty - 1;
-		unsigned int sm_yplus1 = y == ny - 1 ? ty : ty + 1;
+		unsigned int sm_xminus1 = x == 0      ? tx : tx - 1;
+		unsigned int sm_xplus1  = x == nx - 1 ? tx : tx + 1;
+		unsigned int sm_yminus1 = y == 0      ? ty : ty - 1;
+		unsigned int sm_yplus1  = y == ny - 1 ? ty : ty + 1;
 
 		//global texture indices
-		const float tx_x   = (float) x                            + SF_TEXTURE_OFFSET;
-		const float tx_x1  = (float) ((x == nx - 1) ? x : x + 1)  + SF_TEXTURE_OFFSET;
-		const float tx_x_1 = (float) ((x == 0) ? x : x - 1)       + SF_TEXTURE_OFFSET;
-		const float tx_y   = (float) y                            + SF_TEXTURE_OFFSET;
-		const float tx_y1  = (float) ((y == ny - 1) ? y : y + 1)  + SF_TEXTURE_OFFSET;
-		const float tx_y_1 = (float) ((y == 0) ? y : y - 1)       + SF_TEXTURE_OFFSET;
+		const float xx = (float)x + SF_TEXTURE_OFFSET;
+		const float yy = (float)y + SF_TEXTURE_OFFSET;
 
-		//calculate Ix, Iy, It
-		float Ix = 0.5f
-				* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
-						- tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
-						+ tex2D(tex_flow_sor_I1, tx_x1, tx_y)
-						- tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
+		//calculate Ix, Iy
+		float Ix = 0.5f	 * (tex2D( tex_flow_sor_I2, xx + 1, yy )
+						  - tex2D( tex_flow_sor_I2, xx - 1, yy )
+						  + tex2D( tex_flow_sor_I1, xx + 1, yy )
+						  - tex2D( tex_flow_sor_I1, xx - 1, yy )) * hx_1;
 
-		float Iy = 0.5f
-				* (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
-						- tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
-						+ tex2D(tex_flow_sor_I1, tx_x, tx_y1)
-						- tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
 
-		float It = tex2D(tex_flow_sor_I2, tx_x, tx_y)
-				- tex2D(tex_flow_sor_I1, tx_x, tx_y);
+		float Iy = 0.5f	 * (tex2D(tex_flow_sor_I2, xx, yy + 1)
+						  - tex2D(tex_flow_sor_I2, xx, yy - 1)
+						  + tex2D(tex_flow_sor_I1, xx, yy + 1)
+						  - tex2D(tex_flow_sor_I1, xx, yy - 1)) * hy_1;		
+		
+		float It = tex2D( tex_flow_sor_I2, xx, yy )
+				 - tex2D( tex_flow_sor_I1, xx, yy );
 
-		double dxu = (shared_u1[sm_xplus1][ty] - shared_u1[sm_xminus1][ty]
-				+ shared_du1[sm_xplus1][ty] - shared_du1[sm_xminus1][ty])
-				* hx_1;
-		double dyu = (shared_u1[tx][sm_yplus1] - shared_u1[tx][sm_yminus1]
-				+ shared_du1[tx][sm_yplus1] - shared_du1[tx][sm_yminus1])
-				* hy_1;
-		double dxv = (shared_u2[sm_xplus1][ty] - shared_u2[sm_xminus1][ty]
-				+ shared_du2[sm_xplus1][ty] - shared_du2[sm_xminus1][ty])
-				* hx_1;
-		double dyv = (shared_u2[tx][sm_yplus1] - shared_u2[tx][sm_yminus1]
-				+ shared_du2[tx][sm_yplus1] - shared_du2[tx][sm_yminus1])
-				* hy_1;
+		double dxu = (shared_u1[sm_xplus1][ty]  - shared_u1[sm_xminus1][ty]
+				    + shared_du1[sm_xplus1][ty] - shared_du1[sm_xminus1][ty])
+				    * hx_1;
+		double dyu = (shared_u1[tx][sm_yplus1]  - shared_u1[tx][sm_yminus1]
+				    + shared_du1[tx][sm_yplus1] - shared_du1[tx][sm_yminus1])
+				    * hy_1;
+		double dxv = (shared_u2[sm_xplus1][ty]  - shared_u2[sm_xminus1][ty]
+				    + shared_du2[sm_xplus1][ty] - shared_du2[sm_xminus1][ty])
+				    * hx_1;
+		double dyv = (shared_u2[tx][sm_yplus1]  - shared_u2[tx][sm_yminus1]
+				    + shared_du2[tx][sm_yplus1] - shared_du2[tx][sm_yminus1])
+				    * hy_1;
 
-		double dataterm = shared_du1[tx][ty] * Ix + shared_du2[tx][ty] * Iy
-				+ It;
+		double dataterm = shared_du1[tx][ty] * Ix + shared_du2[tx][ty] * Iy + It;
 		
 		//calculate penalty terms
-		penaltyd_g[idx] = 1.0f/sqrt(dataterm * dataterm + data_epsilon);
-		penaltyr_g[idx] = 1.0f/sqrt(
-				dxu * dxu + dxv * dxv + dyu * dyu + dyv * dyv + diff_epsilon);
+		penaltyd_g[idx] = 1.0f / sqrt(dataterm * dataterm + data_epsilon);
+		penaltyr_g[idx] = 1.0f / sqrt(dxu * dxu + dxv * dxv + dyu * dyu + dyv * dyv + diff_epsilon);
 	}
 }
 
@@ -340,8 +333,8 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 	__shared__ float shared_penaltyd[SF_BW+2][SF_BH+2];
 	__shared__ float shared_penaltyr[SF_BW+2][SF_BH+2];
 
-	const int tx = threadIdx.x + 1;
-	const int ty = threadIdx.y + 1;
+	const int tx  = threadIdx.x + 1;
+	const int ty  = threadIdx.y + 1;
 	const int idx = y * pitchf1 + x;
 
 	//first setup shared memory
@@ -428,50 +421,45 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		unsigned int sm_yminus1 = y == 0      ? ty : ty - 1;
 		unsigned int sm_yplus1  = y == ny - 1 ? ty : ty + 1;
 
-		//global indices
-		const float tx_x   = (float) x                            + SF_TEXTURE_OFFSET;
-		const float tx_x1  = (float) ((x == nx - 1) ? x : x + 1)  + SF_TEXTURE_OFFSET;
-		const float tx_x_1 = (float) ((x == 0) ? x : x - 1)       + SF_TEXTURE_OFFSET;
-		const float tx_y   = (float) y                            + SF_TEXTURE_OFFSET;
-		const float tx_y1  = (float) ((y == ny - 1) ? y : y + 1)  + SF_TEXTURE_OFFSET;
-		const float tx_y_1 = (float) ((y == 0) ? y : y - 1)       + SF_TEXTURE_OFFSET;
+		//global texture indices
+		const float xx = (float)x + SF_TEXTURE_OFFSET;
+		const float yy = (float)y + SF_TEXTURE_OFFSET;
 
-		//calculate Ix, Iy, It
-		float Ix = 0.5f
-				* (tex2D(tex_flow_sor_I2, tx_x1, tx_y)
-				 - tex2D(tex_flow_sor_I2, tx_x_1, tx_y)
-				 + tex2D(tex_flow_sor_I1, tx_x1, tx_y)
-				 - tex2D(tex_flow_sor_I1, tx_x_1, tx_y)) * hx_1;
+		//calculate Ix, Iy
+		float Ix = 0.5f	 * (tex2D( tex_flow_sor_I2, xx + 1, yy )
+						  - tex2D( tex_flow_sor_I2, xx - 1, yy )
+						  + tex2D( tex_flow_sor_I1, xx + 1, yy )
+						  - tex2D( tex_flow_sor_I1, xx - 1, yy )) * hx_1;
 
-		float Iy = 0.5f
-				* (tex2D(tex_flow_sor_I2, tx_x, tx_y1)
-				 - tex2D(tex_flow_sor_I2, tx_x, tx_y_1)
-				 + tex2D(tex_flow_sor_I1, tx_x, tx_y1)
-				 - tex2D(tex_flow_sor_I1, tx_x, tx_y_1)) * hy_1;
 
-		float It = tex2D(tex_flow_sor_I2, tx_x, tx_y)
-				 - tex2D(tex_flow_sor_I1, tx_x, tx_y);
+		float Iy = 0.5f	 * (tex2D(tex_flow_sor_I2, xx, yy + 1)
+						  - tex2D(tex_flow_sor_I2, xx, yy - 1)
+						  + tex2D(tex_flow_sor_I1, xx, yy + 1)
+						  - tex2D(tex_flow_sor_I1, xx, yy - 1)) * hy_1;		
 		
-		float xp = x < nx-1 ? (shared_penaltyr[sm_xplus1][ty]  + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
-		float xm = x > 0    ? (shared_penaltyr[sm_xminus1][ty] + shared_penaltyr[tx][ty])*0.5f*hx_2 : 0.0f;
-		float yp = y < ny-1 ? (shared_penaltyr[tx][sm_yplus1]  + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
-		float ym = y > 0    ? (shared_penaltyr[tx][sm_yminus1] + shared_penaltyr[tx][ty])*0.5f*hy_2 : 0.0f;
+		float It = tex2D( tex_flow_sor_I2, xx, yy )
+				 - tex2D( tex_flow_sor_I1, xx, yy );
+		
+		float xp = x < nx-1 ? (shared_penaltyr[sm_xplus1][ty]  + shared_penaltyr[tx][ty]) * 0.5f * hx_2 : 0.0f;
+		float xm = x > 0    ? (shared_penaltyr[sm_xminus1][ty] + shared_penaltyr[tx][ty]) * 0.5f * hx_2 : 0.0f;
+		float yp = y < ny-1 ? (shared_penaltyr[tx][sm_yplus1]  + shared_penaltyr[tx][ty]) * 0.5f * hy_2 : 0.0f;
+		float ym = y > 0    ? (shared_penaltyr[tx][sm_yminus1] + shared_penaltyr[tx][ty]) * 0.5f * hy_2 : 0.0f;
 		
 		//sum up elements
 		float sum = xp + xm + yp + ym;
 
 		bu_g[idx] = -penaltyd_g[idx] * Ix*It
-							+ (x>0    ? xm * shared_u1[sm_xminus1][ty] : 0.0f)
-							+ (x<nx-1 ? xp * shared_u1[sm_xplus1][ty]  : 0.0f)
-							+ (y>0    ? ym * shared_u1[tx][sm_yminus1] : 0.0f)
-							+ (y<ny-1 ? yp * shared_u1[tx][sm_yplus1]  : 0.0f)
+							+ (x > 0    ? xm * shared_u1[sm_xminus1][ty] : 0.0f)
+							+ (x < nx-1 ? xp * shared_u1[sm_xplus1][ty]  : 0.0f)
+							+ (y > 0    ? ym * shared_u1[tx][sm_yminus1] : 0.0f)
+							+ (y < ny-1 ? yp * shared_u1[tx][sm_yplus1]  : 0.0f)
 							- sum * shared_u1[tx][ty];
 
 		bv_g[idx] = -penaltyd_g[idx] * Iy*It
-							+ (x>0    ? xm * shared_u2[sm_xminus1][ty] : 0.0f)
-							+ (x<nx-1 ? xp * shared_u2[sm_xplus1][ty]  : 0.0f)
-							+ (y>0    ? ym * shared_u2[tx][sm_yminus1] : 0.0f)
-							+ (y<ny-1 ? yp * shared_u2[tx][sm_yplus1]  : 0.0f)
+							+ (x > 0    ? xm * shared_u2[sm_xminus1][ty] : 0.0f)
+							+ (x < nx-1 ? xp * shared_u2[sm_xplus1][ty]  : 0.0f)
+							+ (y > 0    ? ym * shared_u2[tx][sm_yminus1] : 0.0f)
+							+ (y < ny-1 ? yp * shared_u2[tx][sm_yplus1]  : 0.0f)
 							- sum * shared_u2[tx][ty];
 	}
 }
@@ -624,19 +612,19 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		const float xx = (float) x + SF_TEXTURE_OFFSET;
 		const float yy = (float) y + SF_TEXTURE_OFFSET;
 
-		float lala = tex2D(tex_flow_sor_I2, xx + 1, yy);
+		float lala = tex2D( tex_flow_sor_I2, xx + 1, yy );
 
 		//calculate Ix, Iy
-		float Ix = 0.5f	 * (tex2D(tex_flow_sor_I2, xx + 1, yy)
-						  - tex2D(tex_flow_sor_I2, xx - 1, yy)
-						  + tex2D(tex_flow_sor_I1, xx + 1, yy)
-						  - tex2D(tex_flow_sor_I1, xx - 1, yy)) * hx_1;
+		float Ix = 0.5f	 * (tex2D( tex_flow_sor_I2, xx + 1, yy )
+						  - tex2D( tex_flow_sor_I2, xx - 1, yy )
+						  + tex2D( tex_flow_sor_I1, xx + 1, yy )
+						  - tex2D( tex_flow_sor_I1, xx - 1, yy) ) * hx_1;
 
 
-		float Iy = 0.5f	 * (tex2D(tex_flow_sor_I2, xx, yy + 1)
-						  - tex2D(tex_flow_sor_I2, xx, yy - 1)
-						  + tex2D(tex_flow_sor_I1, xx, yy + 1)
-						  - tex2D(tex_flow_sor_I1, xx, yy - 1)) * hy_1;
+		float Iy = 0.5f	 * (tex2D( tex_flow_sor_I2, xx, yy + 1 )
+						  - tex2D( tex_flow_sor_I2, xx, yy - 1 )
+						  + tex2D( tex_flow_sor_I1, xx, yy + 1 )
+						  - tex2D( tex_flow_sor_I1, xx, yy - 1) ) * hy_1;
 
 		
 		float xp = x < nx - 1 ? ( shared_regPen[x1][ty]  + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
@@ -746,40 +734,6 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 	}
 }
 
-/*
- * Initializes an float array to zero
- */
-__global__ void initializeToZero(float* array, int width, int height,
-		int pitch, bool black)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (x < width && y < height)
-	{
-		if (black)
-			array[x + y * pitch] = 0.0f;
-		else
-			array[x + y * pitch] = 255.0f;
-	}
-}
-
-/*
- * Initializes two similar float arrays to zero
- */
-__global__ void initializeTwoToZero(float* array1, float* array2, int width,
-		int height, int pitch)
-{
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (x < width && y < height)
-	{
-		array1[x + y * pitch] = 255.0f;
-		array2[x + y * pitch] = 128.0f;
-	}
-}
-
 float FlowLibGpuSOR::computeFlow()
 {
 	bool verbose = true;
@@ -866,12 +820,10 @@ float FlowLibGpuSOR::computeFlow()
 
 
 		// current grid and block dimensions
-		int ngx =
-				(nx_fine % SF_BW) ? ((nx_fine / SF_BW) + 1) : (nx_fine / SF_BW);
-		int ngy =
-				(ny_fine % SF_BH) ? ((ny_fine / SF_BH) + 1) : (ny_fine / SF_BH);
-		dim3 dimGrid(ngx, ngy);
-		dim3 dimBlock(SF_BW, SF_BH);
+		int ngx = (nx_fine % SF_BW) ? ((nx_fine / SF_BW) + 1) : (nx_fine / SF_BW);
+		int ngy = (ny_fine % SF_BH) ? ((ny_fine / SF_BH) + 1) : (ny_fine / SF_BH);
+		dim3 dimGrid( ngx, ngy );
+		dim3 dimBlock( SF_BW, SF_BH );
 
 		// resize flowfield to current level
 		if (rec_depth < max_rec_depth)
