@@ -330,7 +330,6 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 
 	__shared__ float shared_u1[SF_BW+2][SF_BH+2];
 	__shared__ float shared_u2[SF_BW+2][SF_BH+2];
-	__shared__ float shared_penaltyd[SF_BW+2][SF_BH+2];
 	__shared__ float shared_penaltyr[SF_BW+2][SF_BH+2];
 
 	const int tx  = threadIdx.x + 1;
@@ -739,7 +738,7 @@ float FlowLibGpuSOR::computeFlow()
 	bool verbose = true;
 	
 	// main algorithm goes here
-	if (verbose)fprintf(stderr, "\computeFlowGPU");
+	if (verbose)fprintf(stderr, "\ncomputeFlowGPU");
 
 	//the lambda
 	float lambda = _lambda * 255.0f;
@@ -776,10 +775,8 @@ float FlowLibGpuSOR::computeFlow()
 	// initialize horizontal and vertical components of the flow
 	if (verbose)
 		fprintf(stderr, "\nInitializing _u1_g & _u2_g to black");
-	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u1_g, _nx, _ny,
-			_pitchf1, true);
-	initializeToZero<<<initial_dimGrid, initial_dimBlock>>>(_u2_g, _nx, _ny,
-			_pitchf1, true);
+	setKernel <<<initial_dimGrid, initial_dimBlock>>>( _u1_g, _nx, _ny, _pitchf1, 0.0f );
+	setKernel <<<initial_dimGrid, initial_dimBlock>>>( _u2_g, _nx, _ny, _pitchf1, 0.0f );
 	if (verbose)
 			fprintf(stderr, "\nInitialized _u1_g & _u2_g to black");
 
