@@ -125,12 +125,12 @@ void backwardRegistrationBilinearFunctionGlobal(const float *in_g,
 		const float *constant_g, int nx, int ny, int pitchf1_in,
 		int pitchf1_out, float hx, float hy)
 {
-	//same construction as in main flow to compute block and grid size
-	int ngx = (nx % LO_BW) ? ((nx / LO_BW) + 1) : (nx / LO_BW);
-	int ngy = (ny % LO_BH) ? ((ny / LO_BH) + 1) : (ny / LO_BH);
+	// block and grid size
+	int ngx = ((nx - 1) / LO_BW) + 1;
+	int ngy = ((ny - 1) / LO_BH) + 1;
 
-	dim3 dimGrid(ngx, ngy);
-	dim3 dimBlock(LO_BW, LO_BH);
+	dim3 dimGrid( ngx, ngy );
+	dim3 dimBlock( LO_BW, LO_BH );
 
 	//call warp method on gpu
 	backwardRegistrationBilinearFunctionGlobalGpu<<<dimGrid, dimBlock>>>(in_g,
@@ -430,13 +430,27 @@ void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 __global__ void addKernel(const float *increment_g, float *accumulator_g,
 		int nx, int ny, int pitchf1)
 {
-	// ### Implement me ###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int idx = y * pitchf1 + x;
+	
+	if( x < nx && y < ny )
+	{
+		accumulator_g[idx] += increment_g[idx];
+	}
 }
 
 __global__ void subKernel(const float *increment_g, float *accumulator_g,
 		int nx, int ny, int pitchf1)
 {
-	// ### Implement me ###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int idx = y * pitchf1 + x;
+	
+	if( x < nx && y < ny )
+	{
+		accumulator_g[idx] -= increment_g[idx];
+	}
 }
 
 __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
@@ -445,9 +459,9 @@ __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int idx = y * pitchf1 + x;
-	if (x < nx && y < ny)
+	
+	if( x < nx && y < ny )
 	{
 		field_g[idx] = value;
 	}
 }
-

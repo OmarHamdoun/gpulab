@@ -76,24 +76,37 @@ void computeSuperresolutionUngerGPU
 		int   debug								//! Debug Flag, if activated the class produces Debug output.
 )
 {
-	//### Implement me###
-
 	// replacing u by u_g ( pointer to resultant data)
 	
-	// TODO: KERNEL TO INITIALISE xi1_g & xi2_g to 0.0f
-	// TODO: KERNEL TO INITIALISE u_g & uor_g to 64.0f
+	// grid and block dimensions
+	int ngx = ((nx - 1) / SR_BW) + 1;
+	int ngy = ((ny - 1) / SR_BH) + 1;
+	dim3 dimGrid ( ngx, ngy );
+	dim3 dimBlock ( SR_BW, SR_BH );
 	
-	// TODO: KERNEL TO SET q_g TO 0.0f, LOOPS _q.size() TIMES 
+	// initialise xi1_g and xi2_g to zero
+	setKernel <<<dimGrid, dimBlock>>>( xi1_g, nx, ny, pitchf1, 0.0f );
+	setKernel <<<dimGrid, dimBlock>>>( xi2_g, nx, ny, pitchf1, 0.0f );
 	
-	float factorquad = factor_rescale_x*factor_rescale_y*factor_rescale_x*factor_rescale_y;
-	float factor_degrade_update = pow(factorquad,CLIPPING_TRADEOFF_DEGRADE_1N);
+	// initialise u_g and uor_g to 64.0f
+	setKernel <<<dimGrid, dimBlock>>>( u_g,   nx, ny, pitchf1, 64.0f );
+	setKernel <<<dimGrid, dimBlock>>>( uor_g, nx, ny, pitchf1, 64.0f );
 	
-	float factor_degrade_clipping = factorquad/factor_degrade_update;
-	float huber_denom_degrade = 1.0f + huber_epsilon*tau_d/factor_degrade_clipping;
+	// initialise all elements of q_g to zero
+	for(unsigned int k = 0; k < q_g.size(); k++ )
+	{
+		setKernel <<<dimGrid, dimBlock>>>( q_g[k], nx, ny, pitchf1, 0.0f );
+	}
+	
+	float factorquad              = factor_rescale_x * factor_rescale_x * factor_rescale_y * factor_rescale_y;
+	float factor_degrade_update   = pow( factorquad, CLIPPING_TRADEOFF_DEGRADE_1N );
+	
+	float factor_degrade_clipping = factorquad / factor_degrade_update;
+	float huber_denom_degrade     = 1.0f + huber_epsilon * tau_d / factor_degrade_clipping;
 
-	float factor_tv_update = pow(factor_tv,CLIPPING_TRADEOFF_TV);
-	float factor_tv_clipping = factor_tv/factor_tv_update;
-	float huber_denom_tv = 1.0f + huber_epsilon*tau_d/factor_tv;
+	float factor_tv_update        = pow( factor_tv, CLIPPING_TRADEOFF_TV );
+	float factor_tv_clipping      = factor_tv / factor_tv_update;
+	float huber_denom_tv          = 1.0f + huber_epsilon * tau_d / factor_tv;
 	
 	for(int i=0;i<oi;i++)
 	{
@@ -110,22 +123,26 @@ void computeSuperresolutionUngerGPU
 		// NEED TO SET A ITERATOR FOR FLOWS
 		//std::list<Flow>::iterator flow = _flows.begin();
 				
-		// for( k=0; k< _(while image is not the last original image)__ ; k++ ) // TODO
+		std::vector<float*>::iterator image = images_g.begin();
+		std::list<FlowGPU>::iterator flow   = flowsGPU.begin();
+		for( int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
 				// TODO: KERNEL BACKWARDREGISTRATIONBILINEARVALUE
 				
 		
-				if(blur > 0.0f)
+				if( blur > 0.0f )
 				{
 					// TODO: KERNEL FOR GAUSSBLURSEPARATEMIRROR
 				}
 				else
 				{
-					// SWAP THE HELPER ARRAY POINTERS
-					float *temp = temp1_g; temp1_g = temp2_g; temp2_g = temp;
+					// swap the helper array pointers
+					float *temp = temp1_g;
+					temp1_g = temp2_g;
+					temp2_g = temp;
 				}
 		
-				if(factor_rescale_x > 1.0f || factor_rescale_y > 1.0f)
+				if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 				{
 					resampleAreaParallelSeparate(temp2_g, temp1_g, nx, ny,
 												pitchf1, nx_orig, ny_orig,
@@ -133,43 +150,51 @@ void computeSuperresolutionUngerGPU
 				}
 				else
 				{
-					// SWAP THE HELPER ARRAY POINTERS
-					float *temp = temp1_g; temp1_g = temp2_g; temp2_g = temp;
+					// swap the helper array pointers
+					float *temp = temp1_g;
+					temp1_g = temp2_g;
+					temp2_g = temp;
 				}
 				
 				// TODO: KERNEL FOR dualL1Difference
 				
-				// USE k IN FOR LOOP
-				//k++; 
 		}
 		
 		// TODO: KERNEL TO SET 3RD HELPER ARRAY TO 0.00f
 
-		// for( k=0; k< _(while image is not the last original image)__ ; k++ ) // TODO
+		image = images_g.begin();
+		flow   = flowsGPU.begin();
+		for( int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )
 		{
-			if(factor_rescale_x > 1.0f || factor_rescale_y > 1.0f)
+			if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 			{
 				// TODO: WRITE KERNEL resampleAreaParallelizableSeparateAdjoined
 			}
 			else
 			{
-				// TODO: KERNEL TO COPY q_g[k] to temp1_g
+				// copy q_g[k] to temp1_g
+				cudaMemcpy( temp1_g, q_g[k], ny * pitchf1, cudaMemcpyDeviceToDevice ); 	
 			}
-			if(blur > 0.0f)
+			
+			if( blur > 0.0f )
 			{
 				// TODO: KERNEL FOR GAUSSBLURSEPARATEMIRROR
 				// lookout for change in parameters, if any
 			}
 			else
 			{
-				// SWAP THE HELPER ARRAY POINTERS
-				float *temp = temp1_g; temp1_g = temp2_g; temp2_g = temp;
+				// swap the helper array pointers
+				float *temp = temp1_g;
+				temp1_g = temp2_g;
+				temp2_g = temp;
 			}
 			
 			// TODO: IMPLEMENT forewardRegistrationBilinear
 			
-			// TODO: KERNEL TO ADD 1ST TO 3RD HELPER ARRAY
-		}	
+			// add 1st to 3rd helper array
+			addKernel <<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
+		}
+		
 		// TODO: IMPLMENT KERNEL primal1N
 	}	
 }
