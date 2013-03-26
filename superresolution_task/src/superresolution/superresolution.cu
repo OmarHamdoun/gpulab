@@ -77,7 +77,6 @@ void computeSuperresolutionUngerGPU
 )
 {
 	//### Implement me###
-	fprintf(stderr,"\nComputing 1N Superresolution from %i Images on GPU",(int)_images_original.size());
 
 	// replacing u by u_g ( pointer to resultant data)
 	
@@ -92,19 +91,18 @@ void computeSuperresolutionUngerGPU
 	float factor_degrade_clipping = factorquad/factor_degrade_update;
 	float huber_denom_degrade = 1.0f + huber_epsilon*tau_d/factor_degrade_clipping;
 
-	float factor_tv_update = pow(_factor_tv,CLIPPING_TRADEOFF_TV);
+	float factor_tv_update = pow(factor_tv,CLIPPING_TRADEOFF_TV);
 	float factor_tv_clipping = factor_tv/factor_tv_update;
-	float huber_denom_tv = 1.0f + huber_epsilon*tau_d/_factor_tv;
+	float huber_denom_tv = 1.0f + huber_epsilon*tau_d/factor_tv;
 	
-	for(int i=0;i<_iterations;i++)
+	for(int i=0;i<oi;i++)
 	{
 		fprintf(stderr," %i",i);
 
 		//TODO: KERNEL FOR DUAL TV
 		//dualTVHuber(_u_overrelaxed,_xi1,_xi2,_nx,_ny,factor_tv_update,factor_tv_clipping,huber_denom_tv,_tau_d);
 
-		//DUAL DATA
-		unsigned int k=0;
+		//DUAL DATA		
 		
 		// NEED TO INITIALISE A ITERATOR FOR ORIGINAL IMAGES
 		//std::vector<cv::Mat*>::iterator image = _images_original.begin();
@@ -146,10 +144,7 @@ void computeSuperresolutionUngerGPU
 		}
 		
 		// TODO: KERNEL TO SET 3RD HELPER ARRAY TO 0.00f
-		
-		k=0;
-		image = _images_original.begin();
-		flow = _flows.begin();
+
 		// for( k=0; k< _(while image is not the last original image)__ ; k++ ) // TODO
 		{
 			if(factor_rescale_x > 1.0f || factor_rescale_y > 1.0f)
@@ -175,8 +170,8 @@ void computeSuperresolutionUngerGPU
 			
 			// TODO: KERNEL TO ADD 1ST TO 3RD HELPER ARRAY
 		}	
-		
 		// TODO: IMPLMENT KERNEL primal1N
+	}	
 }
 
 
