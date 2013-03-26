@@ -28,7 +28,7 @@
 #include <filesystem/filesystem.h>
 #include <superresolution/superresolution.hpp>
 //#include <resampling_old.h>
-#include <boost/format.hpp>
+//#include <boost/format.hpp>
 //#include <convolution.h>
 #include <linearoperations/linearoperations.h>
 
@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
 	float superresolution_blur = 0.5f;
 	float flowBlur = 5.0f;
 
-	bool loadFlows = false;
+	bool loadFlows = true;
 	bool saveFlows = true;
 
 	Folder folder(sourcedirname);
@@ -86,6 +86,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	// BOOST REPLACEMENT
+	// prepare file names
+	char superresolution_factor_rescale_char[32], superresolution_factor_tv_char[32];
+	snprintf( superresolution_factor_rescale_char, 32, "%f", superresolution_factor_rescale );
+	snprintf( superresolution_factor_tv_char, 32, "%f", superresolution_factor_tv );
+	// /BOOST REPLACEMENT
 
 	fprintf(stderr,"\nPGM Files:\n");
 
@@ -155,6 +161,9 @@ int main(int argc, char *argv[])
 	}
 
 	//Creating Flows Filenames
+	// BOOST REPLACEMENT
+	char flows_src_dst_i_char[32]; // temp var for float to char conversion
+	// /BOOST REPLACEMENT
 	int flowCounter = 0;
 	for(int i=0;(unsigned int)i<images_preblurred.size();i++){
 		flows_src_dst.push_back(std::list<Flow>());
@@ -164,11 +173,22 @@ int main(int argc, char *argv[])
 				flows_src_dst[i].push_back(Flow());
 				flows_src_dst[i].back().nx = nx;
 				flows_src_dst[i].back().ny = ny;
+
+				// BOOST REPLACEMENT
+				// convert smoothness to string
+				snprintf( flows_src_dst_i_char, 32, "%f", flows_src_dst[i].back().smoothness );
+
+				flows_src_dst[i].back().filename = sourcedirname + "/flow_" + imagenames[i] + "_" + imagenames[j] +
+				"_" + superresolution_factor_rescale_char + "_" + flows_src_dst_i_char + ".flo";
+				
+				/*
 				flows_src_dst[i].back().filename =
 						sourcedirname + "/flow_" + imagenames[i] + "_" + imagenames[j] +
 						(boost::format("_%f")%superresolution_factor_rescale).str()  +
 						(boost::format("_%f")%flows_src_dst[i].back().smoothness).str()  +
 						".flo";
+				*/
+				// /BOOST REPLACEMENT
 				flows_src_dst[i].back().src = images_preblurred[i];
 				flows_src_dst[i].back().dst = images_preblurred[j];
 			}
@@ -282,10 +302,18 @@ int main(int argc, char *argv[])
 
 		fprintf(stderr,"\nComputing...");
 		superresolution->compute();
+
+		// BOOST REPLACEMENT
+		std::string filename = resultdirname + "/sr_" + imagenames[i] + superresolution_factor_rescale_char + "_" + superresolution_factor_tv_char + ".png";
+		cv::imwrite( filename, *(superresolution->_result) );
+		
+		/*
 		cv::imwrite(resultdirname+"/sr_"+imagenames[i]+
 				(boost::format("_%f")%superresolution_factor_rescale).str() +
 				(boost::format("_%f")%superresolution_factor_tv).str() +
 				".png",*(superresolution->_result));
+		*/
+		// /BOOST REPLACEMENT
 		delete superresolution;
 	}
 
