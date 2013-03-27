@@ -71,12 +71,19 @@ __device__ float atomicAdd(float* address, double val)
 
 #endif
 
+//================================================================
+// backward warping
+//================================================================
+
+
 void backwardRegistrationBilinearValueTex(const float *in_g,
 		const float *flow1_g, const float *flow2_g, float *out_g, float value,
 		int nx, int ny, int pitchf1_in, int pitchf1_out, float hx, float hy)
 {
 	// ### Implement me ###
 }
+
+
 
 // gpu warping kernel
 __global__ void backwardRegistrationBilinearFunctionGlobalGpu(const float *in_g,
@@ -125,12 +132,12 @@ void backwardRegistrationBilinearFunctionGlobal(const float *in_g,
 		const float *constant_g, int nx, int ny, int pitchf1_in,
 		int pitchf1_out, float hx, float hy)
 {
-	//same construction as in main flow to compute block and grid size
-	int ngx = (nx % LO_BW) ? ((nx / LO_BW) + 1) : (nx / LO_BW);
-	int ngy = (ny % LO_BH) ? ((ny / LO_BH) + 1) : (ny / LO_BH);
+	// block and grid size
+	int ngx = ((nx - 1) / LO_BW) + 1;
+	int ngy = ((ny - 1) / LO_BH) + 1;
 
-	dim3 dimGrid(ngx, ngy);
-	dim3 dimBlock(LO_BW, LO_BH);
+	dim3 dimGrid( ngx, ngy );
+	dim3 dimBlock( LO_BW, LO_BH );
 
 	//call warp method on gpu
 	backwardRegistrationBilinearFunctionGlobalGpu<<<dimGrid, dimBlock>>>(in_g,
@@ -146,12 +153,105 @@ void backwardRegistrationBilinearFunctionTex(const float *in_g,
 	// ### Implement me, if you want ###
 }
 
-void forewardRegistrationBilinearAtomic(const float *flow1_g,
-		const float *flow2_g, const float *in_g, float *out_g, int nx, int ny,
-		int pitchf1)
+
+
+//================================================================
+// forward warping
+//================================================================
+
+
+__global__ void foreward_warp_kernel_atomic (
+		const float *flow1_g,	// flow.u
+		const float *flow2_g,	// flow.v
+		const float *in_g,		// temp2_g
+		float *out_g,			// temp1_g
+		int nx,
+		int ny,
+		int pitchf1
+	)
 {
-	// ### Implement me ###
+	// get thread coordinates and index
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const unsigned int idx = y * pitchf1 + x;
+			
+	// reset shared memory to zero
+	out_g[idx] = 0.0f;
+		
+	// calculate target coordinates: coords + flow values
+	const float xx = (float)x + flow1_g[idx];
+	const float yy = (float)y + flow2_g[idx];
+	
+	// continue only if target area inside image
+	if(
+			xx >= 0.0f &&
+			xx <= (float)(nx - 2) &&
+			yy >= 0.0f &&
+			yy <= (float)(ny - 2))
+	{
+		float xxf = floor(xx);
+		float yyf = floor(yy);
+		
+		// target pixel coordinates
+		const int xxi = (int)xxf;
+		const int yyi = (int)yyf;
+		
+		xxf = xx - xxf;
+		yyf = yy - yyf;
+		
+		// distribute input pixel value to adjacent pixels of target pixel
+		float out_xy   = in_g[idx] * (1.0f - xxf) * (1.0f - yyf);
+		float out_x1y  = in_g[idx] * xxf * (1.0f - yyf);
+		float out_xy1  = in_g[idx] * (1.0f - xxf) * yyf;
+		float out_x1y1 = in_g[idx] * xxf * yyf;		
+				
+		// eject the warp core!
+		// avoid race conditions by use of atomic operations
+		atomicAdd( out_g + (yyi * nx + xxi),           out_xy );
+		atomicAdd( out_g + (yyi * nx + xxi + 1),       out_x1y );
+		atomicAdd( out_g + ((yyi + 1) * nx + xxi),     out_xy1 );
+		atomicAdd( out_g + ((yyi + 1) * nx + xxi + 1), out_x1y1 );
+		
+		// TODO: think about hierarchical atomics
+		// problem: target coordinates can be anywhere on image,
+		// so shared memory per block is limited reasonable
+		
+	}
+
 }
+
+
+
+/*
+ * Forward warping
+ */
+void forewardRegistrationBilinearAtomic (
+		const float *flow1_g,
+		const float *flow2_g,
+		const float *in_g,
+		float *out_g,
+		int nx,
+		int ny,
+		int pitchf1
+	)
+{
+	// block and grid size
+	int blocksize_x = ((nx - 1) / LO_BW) + 1;
+	int blocksize_y = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( blocksize_x, blocksize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+
+	// invoke atomic warp kernel on gpu
+	foreward_warp_kernel_atomic <<< dimGrid, dimBlock >>> ( flow1_g, flow2_g, in_g, out_g, nx, ny, pitchf1 );
+}
+
+
+
+//================================================================
+// gaussian blur (mirrored)
+//================================================================
+
 
 void gaussBlurSeparateMirrorGpu(float *in_g, float *out_g, int nx, int ny,
 		int pitchf1, float sigmax, float sigmay, int radius, float *temp_g,
@@ -160,283 +260,234 @@ void gaussBlurSeparateMirrorGpu(float *in_g, float *out_g, int nx, int ny,
 	// ### Implement me ###
 }
 
-/*
- __global__ void resampleAreaParallelSeparate_x
- (
- const float * in_g,
- float * out_g,
- int nx,
- int ny,
- float hx,
- int pitchf1_in,
- float factor = 0.0f
- )
- {
- if( factor == 0.0f ) { factor = 1/hx; }
 
- int ix = threadIdx.x + blockIdx.x * blockDim.x;
- int iy = threadIdx.y + blockIdx.y * blockDim.y;
 
- int index = ix + iy * pitchf1_in; // global index for out image
+//================================================================
+// resample separate
+//================================================================
 
- if( ix < nx && iy < ny)
- {
- // initialising out
- out_g[ index ] = 0.0f;
-
- float px = (float)ix * hx;
-
- float left = ceil(px) - px;
- if(left > hx) left = hx;
-
- float midx = hx - left;
- float right = midx - floorf(midx);
- midx = midx - right;
-
- if( left > 0.0f )
- {
- // using pitchf1_in instead of nx_orig in original code
- out_g[index] += in_g[ iy * pitchf1_in + (int) floor(px) ] * left * factor; // look out for conversion of coordinates
- px += 1.0f;
- }
- while(midx > 0.0f)
- {
- // using pitchf1_in instead of nx_orig in original code
- out_g[index] += in_g[ iy * pitchf1_in + (int)(floor(px))] * factor;
- px += 1.0f;
- midx -= 1.0f;
- }
- if(right > RESAMPLE_EPSILON)
- {
- // using pitchf1_in instead of nx_orig in original code
- out_g[index] += in_g[ iy * pitchf1_in + (int)(floor(px))] * right * factor;
- }
- }
- }
-
- __global__ void resampleAreaParallelSeparate_y
- (
- const float * in_g,
- float * out_g,
- int nx,
- int ny,
- float hy,
- int pitchf1_out,
- float factor = 0.0f // need
- )
- {
- if(factor == 0.0f) factor = 1.0f/hy;
-
- int ix = threadIdx.x + blockIdx.x * blockDim.x;
- int iy = threadIdx.y + blockIdx.y * blockDim.y;
-
- int index = ix + iy * pitchf1_out; // global index for out image
- // used pitch instead  of blockDim.x
-
- if( ix < nx && iy < ny ) // guards
- {
- out_g[index] = 0.0f;
-
- float py = (float)iy * hy;
- float top = ceil(py) - py;
-
- if(top > hy) top = hy;
- float midy = hy - top;
-
- float bottom = midy - floorf(midy);
- midy = midy - bottom;
-
- if(top > 0.0f)
- {
- // using pitch for helper array since these all arrays have same pitch
- out_g[index] += in_g[(int)(floor(py)) * pitchf1_out + ix ] * top * factor;
- py += 1.0f;
- }
- while(midy > 0.0f)
- {
- out_g[index] += in_g[(int)(floor(py)) * pitchf1_out + ix ] * factor;
- py += 1.0f;
- midy -= 1.0f;
- }
- if(bottom > RESAMPLE_EPSILON)
- {
- out_g[index] += in_g[(int)(floor(py)) * pitchf1_out + ix ] * bottom * factor;
- }
- }
- }
-
- */
-
-__global__ void resampleAreaParallelSeparateGpu_x(const float *in_g,
-		float *out_g, int nx, int ny, float hx, int pitchf1_in, int pitchf1_out,
-		float scalefactor = 0.0f)
+__global__ void resampleAreaParallelSeparate_x
+	(
+		const float* in_g,
+		float* out_g,
+		int nx,
+		int ny,
+		float hx,
+		int pitchf1_in,
+		int pitchf1_out,
+		float factor = 0.0f
+	)
 {
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int ix = threadIdx.x + blockIdx.x * blockDim.x;
+	const int iy = threadIdx.y + blockIdx.y * blockDim.y;
+	const int index = ix + iy * pitchf1_out; // global index for out image
+	
+	if( factor == 0.0f )
+		factor = 1 / hx;
 
-	// check if x is within the boundaries
-	if (!(x < nx && y < ny))
+	if( ix < nx && iy < ny)
 	{
-		return;
+		// initialising out
+		out_g[ index ] = 0.0f;
+		
+		float px = (float)ix * hx;
+		
+		float left = ceil(px) - px;
+		if(left > hx) left = hx;
+		
+		float midx  = hx - left;
+		float right = midx - floorf(midx);
+		
+		midx = midx - right;
+		
+		if( left > 0.0f )
+		{
+			// using pitchf1_in instead of nx_orig in original code
+			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * left * factor; // look out for conversion of coordinates
+			px += 1.0f;
+		}
+		while( midx > 0.0f )
+		{
+			// using pitchf1_in instead of nx_orig in original code
+			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * factor;
+			px += 1.0f;
+			midx -= 1.0f;
+		}
+		if( right > RESAMPLE_EPSILON )
+		{
+			// using pitchf1_in instead of nx_orig in original code
+			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * right * factor;
+		}
 	}
-
-	int p = y * pitchf1_out + x;
-	// resampling in x
-	if (scalefactor == 0.0f)
-		scalefactor = 1.0f / hx;
-
-	float px = (float) x * hx;
-	float left = ceil(px) - px;
-	if (left > hx)
-		left = hx;
-	float midx = hx - left;
-	float right = midx - floorf(midx);
-	midx = midx - right;
-
-	out_g[p] = 0.0f;
-
-	if (left > 0.0f)
-	{
-		out_g[p] += in_g[y * pitchf1_in + (int) (floor(px))] * left
-				* scalefactor;
-		px += 1.0f;
-	}
-	while (midx > 0.0f)
-	{
-		out_g[p] += in_g[y * pitchf1_in + (int) (floor(px))] * scalefactor;
-		px += 1.0f;
-		midx -= 1.0f;
-	}
-	if (right > RESAMPLE_EPSILON)
-	{
-		out_g[p] += in_g[y * pitchf1_in + (int) (floor(px))] * right
-				* scalefactor;
-	}
-
 }
 
-__global__ void resampleAreaParallelSeparateGpu_y(const float *in_g,
-		float *out_g, int nx, int ny, float hy, int pitchf1, float scalefactor =
-				0.0f)
+__global__ void resampleAreaParallelSeparate_y
+	(
+		const float* in_g,
+		float* out_g,
+		int nx,
+		int ny,
+		float hy,
+		int pitchf1_out,
+		float factor = 0.0f // need
+	)
 {
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	// check if x is within the boundaries
-	if (!(x < nx && y < ny))
+	const int ix = threadIdx.x + blockIdx.x * blockDim.x;
+	const int iy = threadIdx.y + blockIdx.y * blockDim.y;
+	const int index = ix + iy * pitchf1_out; // global index for out image
+	// used pitch instead  of blockDim.x
+	
+	if( factor == 0.0f )
+		factor = 1.0f / hy;
+	
+	if( ix < nx && iy < ny ) // guards
 	{
-		return;
+		out_g[index] = 0.0f;
+		
+		float py = (float)iy * hy;
+		float top = ceil(py) - py;
+		
+		if( top > hy )
+			top = hy;
+		
+		float midy = hy - top;
+		
+		float bottom = midy - floorf(midy);
+		midy = midy - bottom;
+		
+		if( top > 0.0f )
+		{
+			// using pitch for helper array since these all arrays have same pitch
+			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * top * factor;
+			py += 1.0f;
+		}
+		while( midy > 0.0f )
+		{
+			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * factor;
+			py += 1.0f;
+			midy -= 1.0f;
+		}
+		if( bottom > RESAMPLE_EPSILON )
+		{
+			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * bottom * factor;
+		}
 	}
-
-	int p = y * pitchf1 + x;
-
-	// resampling in y
-	if (scalefactor == 0.0f)
-		scalefactor = 1.0f / hy;
-
-	float py = (float) y * hy;
-	float top = ceil(py) - py;
-	if (top > hy)
-		top = hy;
-	float midy = hy - top;
-	float bottom = midy - floorf(midy);
-	midy = midy - bottom;
-
-	out_g[p] = 0.0f;
-
-	if (top > 0.0f)
-	{
-		out_g[p] += in_g[(int) (floor(py)) * pitchf1 + x] * top * scalefactor;
-		py += 1.0f;
-	}
-	while (midy > 0.0f)
-	{
-		out_g[p] += in_g[(int) (floor(py)) * pitchf1 + x] * scalefactor;
-		py += 1.0f;
-		midy -= 1.0f;
-	}
-	if (bottom > RESAMPLE_EPSILON)
-	{
-		out_g[p] += in_g[(int) (floor(py)) * pitchf1 + x] * bottom
-				* scalefactor;
-	}
-
 }
 
-void resampleAreaParallelSeparate(const float *in_g, float *out_g, int nx_in,
-		int ny_in, int pitchf1_in, int nx_out, int ny_out, int pitchf1_out,
-		float *help_g, float scalefactor = 1.0f)
+
+void resampleAreaParallelSeparate (
+		const float *in_g,
+		float *out_g,
+		int nx_in,
+		int ny_in,
+		int pitchf1_in,
+		int nx_out,
+		int ny_out,
+		int pitchf1_out,
+		float *help_g,
+		float scalefactor
+	)
 {
+	// helper array is already allocated on the GPU as _b1, now help_g
 
-	if (help_g == 0)
-	{
-		fprintf(stderr, "\nERROR: no helper array for resamling!");
-		return;
-	}
-
-	// first use x_out and y_in
-	int ngx = (nx_out % LO_BW) ? ((nx_out / LO_BW) + 1) : (nx_out / LO_BW);
-	int ngy = (ny_in % LO_BH)  ? ((ny_in / LO_BH)+1) : (ny_in / LO_BH);
-	dim3 dimGrid(ngx, ngy);
-	dim3 dimBlock(LO_BW, LO_BH);
-	float hx = (float) (nx_in) / (float) (nx_out);
-	float hy = (float) (ny_in) / (float) (ny_out);
-
-	resampleAreaParallelSeparateGpu_x<<<dimGrid, dimBlock>>>(in_g, help_g,
-			nx_out, ny_in, hx, pitchf1_in, pitchf1_out,
-			(float) (nx_out) / (float) (nx_in));
-
-	catchkernel;
-
+	// can reduce no of blocks for first pass
+	int blocksize_x = ((nx_out - 1) / LO_BW) + 1;
+	int blocksize_y = ((ny_in - 1) / LO_BH) + 1;
+	
+	dim3 dimGrid( blocksize_x, blocksize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+	
+	
+	float hx = (float)nx_in / (float)nx_out;
+	float factor = (float)(nx_out)/(float)(nx_in);
+	
+	resampleAreaParallelSeparate_x<<< dimGrid, dimBlock >>>( in_g, help_g, nx_out, ny_in,
+				hx, pitchf1_in, pitchf1_out, factor);
+	
 	// this cost us a lot of time -> resize grid to y_out
-	ngy = (ny_out % LO_BH) ? ((ny_out / LO_BH)+1) : (ny_out / LO_BH);
-	dimGrid = dim3(ngx, ngy);
-
-	resampleAreaParallelSeparateGpu_y<<<dimGrid, dimBlock>>>(help_g, out_g,
-			nx_out, ny_out, hy, pitchf1_out,
-			scalefactor * (float) (ny_out) / (float) (ny_in));
-
-	catchkernel;
+	blocksize_y = (ny_out % LO_BH) ? ((ny_out / LO_BH)+1) : (ny_out / LO_BH);
+	dimGrid = dim3( blocksize_x, blocksize_y );
+	
+	float hy = (float)ny_in / (float)ny_out;
+	factor = scalefactor*(float)ny_out / (float)ny_in;
+	
+	resampleAreaParallelSeparate_y<<< dimGrid, dimBlock >>>( help_g, out_g, nx_out, ny_out,
+			hy, pitchf1_out, factor );
 }
 
-/*
- void resampleAreaParallelSeparate(const float *in_g, float *out_g, int nx_in,
- int ny_in, int pitchf1_in, int nx_out, int ny_out, int pitchf1_out,
- float *help_g, float scalefactor)
- {
- // helper array is already allocated on the GPU as _b1, now help_g
-
- // can reduce no of blocks for first pass
- dim3 dimGrid((int)ceil((float)nx_out/LO_BW), (int)ceil((float)ny_out/LO_BH));
- dim3 dimBlock(LO_BW,LO_BH);
-
- float hx = (float) nx_in/ (float) nx_out;
- float factor = (float)(nx_out)/(float)(nx_in);
- resampleAreaParallelSeparate_x<<< dimGrid, dimBlock >>>( in_g, help_g, nx_out, ny_in, hx, pitchf1_in, factor);
-
- float hy = (float)(ny_in)/(float)(ny_out);
- factor = scalefactor*(float)(ny_out)/(float)(ny_in);
- resampleAreaParallelSeparate_y<<< dimGrid, dimBlock >>>( help_g, out_g, nx_out, ny_out, hy, pitchf1_out, factor );
- }
- */
+//================================================================
+// resample adjoined
+//================================================================
 
 void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 		int nx_in, int ny_in, int pitchf1_in, int nx_out, int ny_out,
 		int pitchf1_out, float *help_g, float scalefactor)
-{
-	// ### Implement me ###
+{	
+	/*  Here, 
+	 * in_g = q_g[k]   	nx_orig, ny_orig, pitchf1_orig
+	 * out_g = temp1_g 	nx,ny,pitchf1
+	 * (nx_in, ny_in) = ( nx_orig, ny_orig)
+	 * pitchf1_in  = pitchf1_orig
+	 * (nx_out,ny_out) = (nx, ny )
+	 * pitchf1_out = pitchf1
+	 * help_g = temp4_g
+	 * scalefactor = 1.00f (default value)
+	 */
+	
+	// ### Implement me ###		
+	// help_g is already allocated on GPU global memory, no need to check
+	
+	// AM HELL SCARED TO WRITE THIS METHOD DUE TO BLUNDER IN LAST :p STEFAN AN PHILIP, PLZ CROSSCHECK	
+	int xBlocks = ( nx_out % LO_BW ) ? (nx_out / LO_BW) + 1 : (nx_out / LO_BW);
+	int yBlocks = ( ny_in % LO_BH ) ? ( ny_in / LO_BH ) + 1 : ( ny_in / LO_BH );
+	
+	dim3 dimGrid( xBlocks, yBlocks );
+	dim3 dimBlock( LO_BW, LO_BH );
+	
+	float hx = (float)(nx_in)/(float)(nx_out);
+	resampleAreaParallelSeparate_x<<<dimGrid, dimBlock>>>( in_g, help_g, nx_out, ny_in, hx, pitchf1_in, pitchf1_out, 1.0f);
+	//CPU//resampleAreaParallelizableSeparate_x(in,help,nx_out,ny_in,(float)(nx_in)/(float)(nx_out),nx_in,1.0f);
+	
+	yBlocks = ( ny_out % LO_BH ) ? ( ny_out / LO_BH ) + 1 : ( ny_out / LO_BH );
+	dimGrid = dim3( xBlocks, yBlocks );
+	
+	float hy = (float)(ny_in)/(float)(ny_out);
+	
+	resampleAreaParallelSeparate_y<<<dimGrid, dimBlock>>>( help_g, out_g, nx_out, ny_out, hy, pitchf1_out, scalefactor );	
+	//CPU//resampleAreaParallelizableSeparate_y(help,out,nx_out,ny_out,(float)(ny_in)/(float)(ny_out),scalefactor);
 }
+
+
+
+//================================================================
+// simple add sub and set kernels
+//================================================================
+
 
 __global__ void addKernel(const float *increment_g, float *accumulator_g,
 		int nx, int ny, int pitchf1)
 {
-	// ### Implement me ###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int idx = y * pitchf1 + x;
+	
+	if( x < nx && y < ny )
+	{
+		accumulator_g[idx] += increment_g[idx];
+	}
 }
 
 __global__ void subKernel(const float *increment_g, float *accumulator_g,
 		int nx, int ny, int pitchf1)
 {
-	// ### Implement me ###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int idx = y * pitchf1 + x;
+	
+	if( x < nx && y < ny )
+	{
+		accumulator_g[idx] -= increment_g[idx];
+	}
 }
 
 __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
@@ -445,9 +496,9 @@ __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int idx = y * pitchf1 + x;
-	if (x < nx && y < ny)
+	
+	if( x < nx && y < ny )
 	{
 		field_g[idx] = value;
 	}
 }
-
