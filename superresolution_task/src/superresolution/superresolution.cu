@@ -40,12 +40,17 @@
 #define SR_BH 16
 #endif
 
+//shared mem flags
+#define SHARED_MEM 0
+
 #include <linearoperations/linearoperations.h>
 
-
+//TODO where the heck should this used
 extern __shared__ float smem[];
 
-__global__ void dualL1Difference
+//TODO write comment
+// global memory version of dualL1Difference
+__global__ void dualL1Difference_gm
 (
     const float *primal,
     const float *constant,
@@ -78,7 +83,33 @@ __global__ void dualL1Difference
   }
 }
 
-__global__ void primal1N
+//TODO write comment
+// shared memory version of primal1N
+__global__ void dualL1Difference_sm
+(
+    const float *primal,
+    const float *constant,
+    float *dual,
+    int nx,
+    int ny,
+    int pitch,
+    float factor_update,
+    float factor_clipping,
+    float huber_denom,
+    float tau_d
+    )
+{
+  const int x = threadIdx.x + blockDim.x * blockIdx.x;
+  const int y = threadIdx.y + blockDim.y * blockIdx.y;
+  if (x < nx && y < ny)
+  {
+	  //TODO implement
+  }
+}
+
+//TODO write comment
+// global memory version of primal1N
+__global__ void primal1N_gm
 (
     const float *xi1,
     const float *xi2,
@@ -108,7 +139,33 @@ __global__ void primal1N
   }
 }
 
-__global__ void dualTVHuber
+__global__ void primal1N_sm
+(
+    const float *xi1,
+    const float *xi2,
+    const float *degraded,
+    float *u,
+    float *uor,
+    int nx,
+    int ny,
+    int pitch,
+    float factor_tv_update,
+    float factor_degrade_update,
+    float tau_p,
+    float overrelaxation
+    )
+{
+  const int x = threadIdx.x + blockDim.x * blockIdx.x;
+  const int y = threadIdx.y + blockDim.y * blockIdx.y;
+  if (x < nx && y < ny)
+  {
+   //TODO implement me
+  }
+}
+
+//TODO write comment
+// global memory version of primal1N
+__global__ void dualTVHuber_gm
 (
 		float 	*uor_g,								// Field of overrelaxed primal variables
 		float 	*xi1_g, 							// Dual Variable for TV regularization in X direction
@@ -146,6 +203,31 @@ __global__ void dualTVHuber
 		if(denom < 1.0f) denom = 1.0f;
 		xi1_g[p] = dx / denom;
 		xi2_g[p] = dy / denom;
+	}
+}
+
+//TODO write comment
+// shared memory version of primal1N
+__global__ void dualTVHuber_sm
+(
+		float 	*uor_g,								// Field of overrelaxed primal variables
+		float 	*xi1_g, 							// Dual Variable for TV regularization in X direction
+		float 	*xi2_g,								// Dual Variable for TV regularization in Y direction
+		int   	nx,									// New High-Resolution Width
+		int   	ny,									// New High-Resolution Height
+		int   	pitchf1,							// GPU pitch (padded width) of the superresolution high-res fields
+		float   factor_update,
+		float   factor_clipping,
+		float   huber_denom,
+		float   tau_d
+)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if( x < nx && y < ny ) // guards
+	{
+		//TODO implement me
 	}
 }
 
@@ -224,8 +306,16 @@ void computeSuperresolutionUngerGPU
 		dim3 dimGrid( xBlocks, yBlocks );
 		dim3 dimBlock( SR_BW, SR_BH );
 		
-		dualTVHuber<<< dimGrid, dimBlock >>>( uor_g, xi1_g, xi2_g, nx, ny,pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
-		
+
+#ifdef SHARED_MEM
+		dualTVHuber_sm<<<dimGrid,dimBlock>>>
+				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+#else
+		dualTVHuber_gm<<<dimGrid,dimBlock>>>
+				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+#endif
+
+
 		// DUAL DATA		
 		
 		// iterating over all images
@@ -261,9 +351,15 @@ void computeSuperresolutionUngerGPU
 					temp2_g = temp;
 				}
 				
-				dualL1Difference<<<dimGrid, dimBlock>>>(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
-				          factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
-				
+#ifdef SHARED_MEM
+		dualL1Difference_sm<<<dimGrid,dimBlock>>>
+				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+#else
+		dualL1Difference_gm<<<dimGrid, dimBlock>>>(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
+					          factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
+#endif
+
+
 		}
 		
 		// set 3rd helper array to zero
@@ -316,11 +412,11 @@ void computeSuperresolutionUngerGPU
 			addKernel <<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
 		}
 		
-	    primal1N<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
+#ifdef SHARED_MEM
+		primal1N_sm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
+#else
+	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
+#endif
+
 	}	
 }
-
-
-
-
-
