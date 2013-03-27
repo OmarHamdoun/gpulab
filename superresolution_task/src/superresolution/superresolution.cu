@@ -45,10 +45,51 @@
 
 extern __shared__ float smem[];
 
+__global__ void dualTVHuber
+(
+		float 	*uor_g,								// Field of overrelaxed primal variables
+		float 	*xi1_g, 							// Dual Variable for TV regularization in X direction
+		float 	*xi2_g,								// Dual Variable for TV regularization in Y direction
+		int   	nx,									// New High-Resolution Width
+		int   	ny,									// New High-Resolution Height
+		int   	pitchf1,							// GPU pitch (padded width) of the superresolution high-res fields
+		float   factor_update,
+		float   factor_clipping,
+		float   huber_denom,
+		float   tau_d
+)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	
+	if( x < nx && y < ny ) // guards
+	{
+		//DONT FORGET TO USE THE PITCH
+		
+		int x1 = x + 1;
+		if( x1 >= nx ){	x1 = nx-1; }	// at x boundary
+		
+		int y1 = y+1; 
+		if( y1 >= ny ){ y1 = ny-1; }	// at y boundary
+		
+		// do xi1_g, xi2_g & uor_g have same pitch ? confirm - YES
+	
+		const int p = y * pitchf1 + x;
+		
+		float dx = (xi1_g[p] + tau_d * factor_update * (uor_g[y*pitchf1+x1] - uor_g[p])) /huber_denom;
+		float dy = (xi2_g[p] + tau_d * factor_update * (uor_g[y1*pitchf1+x] - uor_g[p])) /huber_denom;
+		float denom = sqrtf( dx * dx + dy * dy ) / factor_clipping;
+		
+		if(denom < 1.0f) denom = 1.0f;
+		xi1_g[p] = dx / denom;
+		xi2_g[p] = dy / denom;
+	}
+}
+
 void computeSuperresolutionUngerGPU
 (
 		float *xi1_g, 							// Dual Variable for TV regularization in X direction
-		float *xi2_g,							// Dual Variable for TV regularization in X direction
+		float *xi2_g,							// Dual Variable for TV regularization in Y direction
 		float *temp1_g,							// Helper array
 		float *temp2_g,
 		float *temp3_g,
@@ -114,6 +155,14 @@ void computeSuperresolutionUngerGPU
 		fprintf(stderr," %i",i);
 
 		// TODO: KERNEL FOR DUAL TV
+		int xBlocks = ( nx % SR_BW ) ? ( nx / SR_BW) + 1 : ( nx / SR_BW );
+		int yBlocks = ( ny % SR_BH ) ? ( ny / SR_BH) + 1 : ( ny / SR_BH );
+		
+		dim3 dimGrid( xBlocks, yBlocks );
+		dim3 dimBlock( SR_BW, SR_BH );
+		
+		dualTVHuber<<< dimGrid, dimBlock >>>( uor_g, xi1_g, xi2_g, nx, ny,pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
+
 		// dualTVHuber(_u_overrelaxed,_xi1,_xi2,_nx,_ny,factor_tv_update,factor_tv_clipping,huber_denom_tv,_tau_d);
 
 		// DUAL DATA		
