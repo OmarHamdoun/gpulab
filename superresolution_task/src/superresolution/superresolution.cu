@@ -162,9 +162,7 @@ void computeSuperresolutionUngerGPU
 		dim3 dimBlock( SR_BW, SR_BH );
 		
 		dualTVHuber<<< dimGrid, dimBlock >>>( uor_g, xi1_g, xi2_g, nx, ny,pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
-
-		// dualTVHuber(_u_overrelaxed,_xi1,_xi2,_nx,_ny,factor_tv_update,factor_tv_clipping,huber_denom_tv,_tau_d);
-
+		
 		// DUAL DATA		
 		
 		// iterating over all images
@@ -216,6 +214,14 @@ void computeSuperresolutionUngerGPU
 			if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 			{
 				// TODO: WRITE KERNEL resampleAreaParallelizableSeparateAdjoined
+				//CPU// resampleAreaParallelizableSeparateAdjoined(_q[k],_help1,_nx_orig,_ny_orig,_nx,_ny,_help4);
+				
+				/*
+				 *  Assuming it resamples a image from q_g[k] from size nx_orig*ny_orig(pitch- pitchf1_orig) to
+				 *  new size nx*ny (pitch- pitchf1) and stores it in temp1_g with the help of helper array
+				 *  temp4_g. The image in temp1_g is then used for gaussian Blurring
+				 */
+				resampleAreaParallelSeparateAdjoined( q_g[k], temp1_g, nx_orig, ny_orig, pitchf1_orig, nx, ny, pitchf1, temp4_g );
 			}
 			else
 			{
