@@ -20,6 +20,8 @@
 #include <auxiliary/cuda_basic.cuh>
 #include <iostream>
 
+#define SHARED_MEM 0
+
 cudaChannelFormatDesc linearoperation_float_tex =
 		cudaCreateChannelDesc<float>();
 texture<float, 2, cudaReadModeElementType> tex_linearoperation;
@@ -27,7 +29,16 @@ bool linearoperation_textures_initialized = false;
 
 #define MAXKERNELRADIUS     20    // maximum allowed kernel radius
 #define MAXKERNELSIZE   21    // maximum allowed kernel radius + 1
+
 __constant__ float constKernel[MAXKERNELSIZE];
+
+void gpu_bindConstantMemory( const float *kernel, int size ) 
+{
+	fprintf( stderr, "\n\nBINDING TEXTURE MEMORY..." );
+	cutilSafeCall( cudaMemcpyToSymbol( constKernel, kernel, size * sizeof(float) ) );
+	fprintf( stderr, "\n\nTEXTURE MEMORY BOUND" );
+}
+
 
 void setTexturesLinearOperations(int mode)
 {
@@ -132,6 +143,60 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 	}
 }
 
+__global__ void backwardRegistrationBilinearValueTexKernel_gm
+	(
+		const float* in_g,
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		float value,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
+{
+	// thread coordinates
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	
+	if( x < nx && y < ny )
+	{
+		float ii_fp = x + (flow1_g[y * pitchf1_in + x] / hx);
+		float jj_fp = y + (flow2_g[y * pitchf1_in + x] / hy);
+	
+		if( (ii_fp < 0.0f) || (jj_fp < 0.0f)
+					 || (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1)) )
+		{
+			out_g[y * pitchf1_out + x] = value;
+		}
+		else if( !isfinite( ii_fp ) || !isfinite( jj_fp ) )
+		{
+			//fprintf(stderr,"!");
+			out_g[ y * pitchf1_out + x] = value;
+		}
+		else
+		{
+			int xx = (int)ii_fp;
+			int yy = (int)jj_fp;
+	
+			int xx1 = xx == nx - 1 ? xx : xx + 1;
+			int yy1 = yy == ny - 1 ? yy : yy + 1;
+	
+			float xx_rest = ii_fp - (float)xx;
+			float yy_rest = jj_fp - (float)yy;
+	
+			out_g[y * pitchf1_out + x] =
+					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy  * pitchf1_in + xx]
+					+ xx_rest * (1.0f - yy_rest)        * in_g[yy  * pitchf1_in + xx1]
+					+ (1.0f - xx_rest) * yy_rest        * in_g[yy1 * pitchf1_in + xx]
+					+ xx_rest * yy_rest                 * in_g[yy1 * pitchf1_in + xx1];
+		}
+	}
+}
+
 
 void backwardRegistrationBilinearValueTex (
 		const float* in_g,		// _u_overrelaxed
@@ -148,30 +213,48 @@ void backwardRegistrationBilinearValueTex (
 	)
 {
 	// block and grid size
-	int ngx = ((nx - 1) / LO_BW) + 1;
-	int ngy = ((ny - 1) / LO_BH) + 1;
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
 
-	dim3 dimGrid( ngx, ngy );
+	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
-	// TODO: binding of texture
 
-	//call warp method on gpu
-	backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>(
-			in_g,
-			flow1_g,
-			flow2_g,
-			out_g,
-			value,
-			nx,
-			ny,
-			pitchf1_in,
-			pitchf1_out,
-			hx,
-			hy
-		);
-	
-	// TODO: release texture
+
+#if SHARED_MEM
+		// TODO: binding of texture
+
+		backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>(
+				in_g,
+				flow1_g,
+				flow2_g,
+				out_g,
+				value,
+				nx,
+				ny,
+				pitchf1_in,
+				pitchf1_out,
+				hx,
+				hy
+			);
+
+		// TODO: release texture
+#else
+		backwardRegistrationBilinearValueTexKernel_gm<<<dimGrid, dimBlock>>>(
+				in_g,
+				flow1_g,
+				flow2_g,
+				out_g,
+				value,
+				nx,
+				ny,
+				pitchf1_in,
+				pitchf1_out,
+				hx,
+				hy
+			);
+#endif
+
 }
 
 
@@ -228,10 +311,10 @@ void backwardRegistrationBilinearFunctionGlobal(const float *in_g,
 		int pitchf1_out, float hx, float hy)
 {
 	// block and grid size
-	int ngx = ((nx - 1) / LO_BW) + 1;
-	int ngy = ((ny - 1) / LO_BH) + 1;
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
 
-	dim3 dimGrid( ngx, ngy );
+	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 
 	//call warp method on gpu
@@ -331,10 +414,10 @@ void forewardRegistrationBilinearAtomic (
 	)
 {
 	// block and grid size
-	int blocksize_x = ((nx - 1) / LO_BW) + 1;
-	int blocksize_y = ((ny - 1) / LO_BH) + 1;
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
 
-	dim3 dimGrid( blocksize_x, blocksize_y );
+	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 
 	// invoke atomic warp kernel on gpu
@@ -347,12 +430,325 @@ void forewardRegistrationBilinearAtomic (
 // gaussian blur (mirrored)
 //================================================================
 
+
 /*
  * gaussian blur with mirrored border
  * 
  * global memory
  */
-__global__ void gaussBlurSeparateMirrorGpuKernel_global (
+/* __global__ void gaussBlurSeparateMirrorGpuKernel_global (
+		float* in_g,
+		float* out_g,
+		int nx,
+		int ny,
+		int pitchf1,
+		float sigmax,
+		float sigmay,
+		int radius,
+		float* mask
+	)
+{
+	// get thread coordinates and index
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	//const unsigned int idx = y * pitchf1 + x;
+	
+	float result;
+
+	// todo: currently assuming that temp_g is given
+	//bool selfalloctemp = temp_g == NULL;
+	//if( selfalloctemp )
+	//	temp_g = new float[nx*ny];
+
+	sigmax = 1.0f / (sigmax * sigmax);
+	sigmay = 1.0f / (sigmay * sigmay);
+
+
+
+	// convolution
+	result = mask[0] * in_g[y * pitchf1 + x];
+
+	for( int i = 1; i <= radius; i++ )
+	{
+		result += mask[i] * (
+				(x - i >= 0) ? 
+				in_g[y * pitchf1 + (x - i)] :
+				in_g[y * pitchf1 + (-1 - (x-i))] 
++
+				(x + i < nx) ?
+				in_g[y * pitchf1 + (x + i)] : 
+				in_g[y * pitchf1 + (nx - (x+i - nx-1))] 
+			);
+	}
+	
+	out_g[y * pitchf1 + x] = result;	
+
+
+
+	( (y-i >= 0) ? in_g[(y-i) * pitchf1 + x] : in_g[(-1 - (y-i)) * pitchf1 + x]) +
+	( (y+i < ny) ? in_g[(y+i) * pitchf1 + x] : in_g[(ny - (y+i - ny-1)) * pitchf1 + x])
+
+
+
+
+}
+*/
+
+
+
+
+
+
+
+/*
+ * Convolution kernel for gaussian blur in x direction
+ *
+ * Of course it is fine to have a universal function,
+ * but specialized ones are faster. A similar kernel
+ * could be used with both X radius and Y radius, first
+ * invoked with Xradius = radius and Yradius = 1, and
+ * then the other way round.
+ * Here the kernel has been splittet into two similar
+ * ones, the first with a hardcoded Yradius of 1, the
+ * second with a hardcoded Xradius of 1.
+ */
+__global__ void gaussBlurConvolutionSeparatedMirrorGpu_x
+	(
+		const float* inputImage,
+		float* outputImage,
+		int iWidth,
+		int iHeight,
+		size_t iPitch,
+		int radius
+	)
+{
+	// get thread/pixel coordinates
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int localThreadIndex = threadIdx.y * LO_BW + threadIdx.x;
+	
+	//==================================
+	// load image data to shared memory
+	//==================================
+	
+	// get size of image chunk
+	int chunkWidth  = LO_BW + ( radius << 1 );
+	int chunkHeight = LO_BH;
+	
+	// create shared memory variable
+	extern __shared__ float sharedImage[];
+	
+	int numThreads = LO_BW * LO_BH;
+	
+	// get block and chunk position (upper left corner of the chunk in the global image)
+	int blockX = blockIdx.x * LO_BW;
+	int blockY = blockIdx.y * LO_BH;
+	int chunkX = blockX - radius;
+	int chunkY = blockY;
+	
+	// chunk offset if padding reaches out of image
+	int chunkOffX = chunkX < 0 ? -1 * chunkX : 0;
+	//int chunkOffY = 0;
+
+	// get updated chunk pos (inside image)
+	chunkX += chunkOffX;
+	//chunkY += chunkOffY;
+	
+	// get actual chunk size (inside image)
+	int actualChunkWidth  = min( chunkX + chunkWidth  - chunkOffX, iWidth  ) - chunkX;
+	int actualChunkHeight = min( chunkY + chunkHeight            , iHeight ) - chunkY;
+	
+	// number of pixels
+	int pixelNum = actualChunkWidth * actualChunkHeight;
+
+
+	// the offsets are relative to the top left corner of the chunk
+	int offsetX, offsetY;
+
+	// load pixels from global to shared memory
+	for( int i = localThreadIndex; i < pixelNum; i += numThreads )
+	{
+		offsetX = i % actualChunkWidth;
+		offsetY = i / actualChunkWidth;
+		
+		sharedImage[ (chunkOffX + offsetX) + chunkWidth * offsetY ] = 
+				inputImage[ (chunkX + offsetX) + iPitch * (chunkY + offsetY) ];
+	}
+
+	// synchronize threads
+	__syncthreads();
+	
+	
+	//==================================
+	// convolution
+	//==================================
+	
+	// continue calculation only for pixels inside the image
+	if( x < iWidth && y < iHeight )
+	{
+		// determine kernel size
+		//const int kWidth  = radius + 1;
+		//const int kHeight = 1;
+		
+		// the kernel is symmetric and therefore only the center and the right half is given
+		// calculate center outside of the loop (otherwise it would be computed twice)
+
+		// shared memory coordinates
+		int tx = threadIdx.x + radius;
+		int ty = threadIdx.y;
+
+		float value = constKernel[0] * sharedImage[ty * chunkWidth + tx]; // temp var for output pixel
+
+		// kernel loop
+		for( int i = 1; i <= radius; ++i )
+		{
+			value += constKernel[i] * (
+				
+				// left side of kernel
+				(x - i >= 0) ? 
+					sharedImage[ty * chunkWidth + (tx - i)] :
+					sharedImage[ty * chunkWidth + (-1 - (tx - i))] // border condition: mirroring
+
+					+
+
+				// right side of kernel
+				(x + i < iWidth) ?
+					sharedImage[ty * chunkWidth + (tx + i)] : 
+					sharedImage[ty * chunkWidth + (iWidth - (tx+i - iWidth-1))] // border condition: mirroring
+			);
+		}
+		// end of kernel loop
+	
+		// write to output image
+		outputImage[ y * iPitch + x ] = value;
+	}
+} 
+
+
+/*
+ * Convolution kernel for gaussian blur in y direction
+ */
+__global__ void gaussBlurConvolutionSeparatedMirrorGpu_y
+	(
+		const float* inputImage,
+		float* outputImage,
+		int iWidth,
+		int iHeight,
+		size_t iPitch,
+		int radius
+	)
+{
+	// get thread/pixel coordinates
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	const int localThreadIndex = threadIdx.y * LO_BW + threadIdx.x;
+	
+	//==================================
+	// load image data to shared memory
+	//==================================
+	
+	// get size of image chunk
+	int chunkWidth  = LO_BW;
+	int chunkHeight = LO_BH + ( radius << 1 );
+	
+	// create shared memory variable
+	extern __shared__ float sharedImage[];
+	
+	int numThreads = LO_BW * LO_BH;
+	
+	// get block and chunk position (upper left corner of the chunk in the global image)
+	int blockX = blockIdx.x * LO_BW;
+	int blockY = blockIdx.y * LO_BH;
+	int chunkX = blockX;
+	int chunkY = blockY - radius;
+	
+	// chunk offset if padding reaches out of image
+	//int chunkOffX = 0;
+	int chunkOffY = chunkY < 0 ? -1 * chunkY : 0;
+
+	// get updated chunk pos (inside image)
+	//chunkX += chunkOffX;
+	chunkY += chunkOffY;
+	
+	// get actual chunk size (inside image)
+	int actualChunkWidth  = min( chunkX + chunkWidth             , iWidth  ) - chunkX;
+	int actualChunkHeight = min( chunkY + chunkHeight - chunkOffY, iHeight ) - chunkY;
+	
+	// number of pixels
+	int pixelNum = actualChunkWidth * actualChunkHeight;
+
+
+	// the offsets are relative to the top left corner of the chunk
+	int offsetX, offsetY;
+
+	// load pixels from global to shared memory
+	for( int i = localThreadIndex; i < pixelNum; i += numThreads )
+	{
+		offsetX = i % actualChunkWidth;
+		offsetY = i / actualChunkWidth;
+		
+		sharedImage[ offsetX + chunkWidth * (chunkOffY + offsetY) ] = 
+				inputImage[ (chunkX + offsetX) + iPitch * (chunkY + offsetY) ];
+	}
+
+	// synchronize threads
+	__syncthreads();
+	
+	
+	//==================================
+	// convolution
+	//==================================
+	
+	// continue calculation only for pixels inside the image
+	if( x < iWidth && y < iHeight )
+	{
+		// determine kernel size
+		//const int kWidth  = radius + 1;
+		//const int kHeight = 1;
+		
+		// the kernel is symmetric and therefore only the center and the right half is given
+		// calculate center outside of the loop (otherwise it would be computed twice)
+
+		// shared memory coordinates
+		int tx = threadIdx.x;
+		int ty = threadIdx.y + radius;
+
+		float value = constKernel[0] * sharedImage[ty * chunkWidth + tx]; // temp var for output pixel
+
+		// kernel loop
+		for( int i = 1; i <= radius; ++i )
+		{
+			value += constKernel[i] * (
+				
+				// left side of kernel
+				(y - i >= 0) ? 
+					sharedImage[(ty - i) * chunkWidth + tx] :
+					sharedImage[(-1 - (ty - i)) * chunkWidth + tx] // border condition: mirroring
+
+					+
+
+				// right side of kernel
+				(y + i < iHeight) ?
+					sharedImage[(ty + i) * chunkWidth + tx] :
+					sharedImage[(iHeight - (ty + i - iHeight-1)) * chunkWidth + tx] // border condition: mirroring
+			);
+		}
+		// end of kernel loop
+	
+		// write to output image
+		outputImage[ y * iPitch + x ] = value;
+	}
+}
+
+
+
+// TODO: test performance of texture instead of dynamically allocated shared memory
+/*
+ * wrapping method for gaussian convolution gpu kernel
+ *
+ * mask is supposed to be a CPU pointer!
+ */
+void gaussBlurSeparateMirrorGpu (
 		float* in_g,
 		float* out_g,
 		int nx,
@@ -362,59 +758,72 @@ __global__ void gaussBlurSeparateMirrorGpuKernel_global (
 		float sigmay,
 		int radius,
 		float* temp_g,
-		float* mask
+		float* mask		// pointer to CPU memory!
 	)
 {
-	// get thread coordinates and index
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-	//const unsigned int idx = y * pitchf1 + x;
-	
-	float result, sum;
+	// block and grid size
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
 
-	// todo: currently assuming that temp_g is given
-	//bool selfalloctemp = temp_g == NULL;
-	//if( selfalloctemp )
-	//	temp_g = new float[nx*ny];
+	dim3 dimGrid( gridsize_x, gridsize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
 
+
+	// todo: necessary? => copy memory? (swaping pointers here not possible)
+	// if( sigmax <= 0.0f || sigmay <= 0.0f || radius < 0 )
+	//	 return;
+
+	// allocate mask memory, if not given
 	bool selfallocmask = mask == NULL;
 	if(selfallocmask)
 		mask = new float[radius + 1];
+
+	// allocate helper array, if not given
+	bool selfalloctemp = temp_g == NULL;
+	if (selfalloctemp)
+	{
+		int pitchBin;
+		cuda_malloc2D( (void**)&temp_g, nx, ny, 1, sizeof(float), &pitchBin );
+	}
 	
+	// set radius automatically, if not given
+	if( radius == 0 )
+	{
+		int maxsigma = (sigmax > sigmay) ? sigmax : sigmay;
+		radius = (int)( 3.0f * maxsigma );
+	}
+
 	sigmax = 1.0f / (sigmax * sigmax);
 	sigmay = 1.0f / (sigmay * sigmay);
 
 	//---------------------
 	// gauss in x direction
 	//---------------------
-
-	// prepare gaussian kernel (1D)
-	// todo: move to shared memory, if computed in threads
-	mask[0] = sum = 1.0f;
+	
+	// prepare gaussian kernel (1D) for x direction
+	float sum = 1.0f;
+	mask[0] = 1.0f;
 	for( int gx = 1; gx <= radius; ++gx )
 	{
-		mask[gx] = exp( -0.5f * ((float)(gx * gx) * sigmax) );
+		mask[gx] = exp( -0.5f * ( (float)(gx * gx) * sigmax) );
 		sum += 2.0f * mask[gx];
 	}
 	// normalize kernel
-	for(int gx = 0; gx <= radius; ++gx )
+	for( int gx = 0; gx <= radius; ++gx )
 	{
 		mask[gx] /= sum;
 	}
 
-	// convolution x
-	result = mask[0] * in_g[y * pitchf1 + x];
+	// bind kernel to constant memory
+	gpu_bindConstantMemory( mask, radius + 1 );
 
-	for( int i = 1; i <= radius; i++ )
-	{
-		result += mask[i] * (
-				( (x - i >= 0) ? ( in_g[y * pitchf1 + (x - i)] ) : ( in_g[y * pitchf1 + (-1 - (x-i))] ) ) +
-				( (x + i < nx) ? ( in_g[y * pitchf1 + (x + i)] ) : ( in_g[y * pitchf1 + (nx - (x+i - nx-1))]) )
-			);
-	}
-	
-	temp_g[y * pitchf1 + x] = result;
-	
+	// get size of shared memory chunk for x convolution dynamically
+	int sharedMemorySize =  ( LO_BW + ( radius << 1) ) * LO_BH * sizeof(float);
+
+	// invoke gauss kernel on gpu for convolution in x direction
+	// MAXKERNELSIZE and MAXKERNELRADIUS do not allow to combine x and y in one kernel
+	gaussBlurConvolutionSeparatedMirrorGpu_x <<< dimGrid, dimBlock, sharedMemorySize >>> ( in_g, temp_g, nx, ny, pitchf1, radius );
+
 	//---------------------
 	// gauss in y direction
 	//---------------------
@@ -429,70 +838,26 @@ __global__ void gaussBlurSeparateMirrorGpuKernel_global (
 		sum += 2.0f * mask[gx];
 	}
 	// normalize kernel
-	for(int gx = 0; gx <= radius; ++gx )
+	for( int gx = 0; gx <= radius; ++gx )
 	{
 		mask[gx] /= sum;
 	}
-
-	// convolution y
-	result = mask[0] * temp_g[y * pitchf1 + x];
-
-	for( int i = 1; i <= radius; ++i )
-	{
-		result += mask[i]*(
-				( (y-i >= 0) ? temp_g[(y-i) * pitchf1 + x] : temp_g[(-1 - (y-i)) * pitchf1 + x]) +
-				( (y+i < ny) ? temp_g[(y+i) * pitchf1 + x] : temp_g[(ny - (y+i - ny-1)) * pitchf1 + x])
-			);
-	}
-
-	out_g[y * pitchf1 + x] = result;
-
-
-	// free memory?
-	//if(selfallocmask) delete [] mask;
-	//if(selfalloctemp) delete [] temp;
-}
-
-void gaussBlurSeparateMirrorGpu (
-		float* in_g,
-		float* out_g,
-		int nx,
-		int ny,
-		int pitchf1,
-		float sigmax,
-		float sigmay,
-		int radius,
-		float* temp_g,
-		float* mask
-	)
-{
-	// block and grid size
-	int blocksize_x = ((nx - 1) / LO_BW) + 1;
-	int blocksize_y = ((ny - 1) / LO_BH) + 1;
-
-	dim3 dimGrid( blocksize_x, blocksize_y );
-	dim3 dimBlock( LO_BW, LO_BH );
-
-
-	// todo: necessary? => copy memory? (swaping pointers here not possible)
-	// if( sigmax <= 0.0f || sigmay <= 0.0f || radius < 0 )
-	//	 return;
 	
-	if( radius == 0 )
-	{
-		int maxsigma = (sigmax > sigmay) ? sigmax : sigmay;
-		radius = (int)( 3.0f * maxsigma );
-	}
-	
-	// todo: allocate gpu memory, if necessary (bind texture)
+	// bind kernel to constant memory
+	gpu_bindConstantMemory( mask, radius + 1 );
 
+	// update size of dynamically allocated shared memory chunk for y convolution
+	sharedMemorySize = LO_BW * ( LO_BH + ( radius << 1) ) * sizeof(float);
+
+	// invoke gauss kernel on gpu for convolution in y direction
+	gaussBlurConvolutionSeparatedMirrorGpu_y <<< dimGrid, dimBlock, sharedMemorySize >>> ( in_g, temp_g, nx, ny, pitchf1, radius );
 	
-	// todo: try performance with prepared mask
-	
-	// invoke gauss kernel on gpu
-	gaussBlurSeparateMirrorGpuKernel_global <<< dimGrid, dimBlock >>> ( in_g, out_g, nx, ny, pitchf1, sigmax, sigmay, radius, temp_g, mask );
-	
-	// todo: free gpu memory, if necessary
+	// free self allocated memory
+	if( selfallocmask )
+		delete [] mask;
+
+	if( selfalloctemp )
+		cutilSafeCall( cudaFree( temp_g ) );
 }
 
 
@@ -626,10 +991,10 @@ void resampleAreaParallelSeparate (
 	// helper array is already allocated on the GPU as _b1, now help_g
 
 	// can reduce no of blocks for first pass
-	int blocksize_x = ((nx_out - 1) / LO_BW) + 1;
-	int blocksize_y = ((ny_in - 1) / LO_BH) + 1;
+	int gridsize_x = ((nx_out - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny_in - 1) / LO_BH) + 1;
 	
-	dim3 dimGrid( blocksize_x, blocksize_y );
+	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
 	
@@ -640,8 +1005,8 @@ void resampleAreaParallelSeparate (
 				hx, pitchf1_in, pitchf1_out, factor);
 	
 	// this cost us a lot of time -> resize grid to y_out
-	blocksize_y = (ny_out % LO_BH) ? ((ny_out / LO_BH)+1) : (ny_out / LO_BH);
-	dimGrid = dim3( blocksize_x, blocksize_y );
+	gridsize_y = (ny_out % LO_BH) ? ((ny_out / LO_BH)+1) : (ny_out / LO_BH);
+	dimGrid = dim3( gridsize_x, gridsize_y );
 	
 	float hy = (float)ny_in / (float)ny_out;
 	factor = scalefactor*(float)ny_out / (float)ny_in;

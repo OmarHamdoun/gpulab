@@ -266,9 +266,9 @@ void computeSuperresolutionUngerGPU
 	// replacing u by u_g ( pointer to resultant data)
 	
 	// grid and block dimensions
-	int ngx = ((nx - 1) / SR_BW) + 1;
-	int ngy = ((ny - 1) / SR_BH) + 1;
-	dim3 dimGrid ( ngx, ngy );
+	int gridsize_x = ((nx - 1) / SR_BW) + 1;
+	int gridsize_y = ((ny - 1) / SR_BH) + 1;
+	dim3 dimGrid ( gridsize_x, gridsize_y );
 	dim3 dimBlock ( SR_BW, SR_BH );
 	
 	// initialise xi1_g and xi2_g to zero
@@ -299,20 +299,13 @@ void computeSuperresolutionUngerGPU
 	{
 		fprintf(stderr," %i",i);
 
-		// TODO: KERNEL FOR DUAL TV
-		int xBlocks = ( nx % SR_BW ) ? ( nx / SR_BW) + 1 : ( nx / SR_BW );
-		int yBlocks = ( ny % SR_BH ) ? ( ny / SR_BH) + 1 : ( ny / SR_BH );
-		
-		dim3 dimGrid( xBlocks, yBlocks );
-		dim3 dimBlock( SR_BW, SR_BH );
-		
-
-#ifdef SHARED_MEM
+		// calculate dual tv
+#if SHARED_MEM
 		dualTVHuber_sm<<<dimGrid,dimBlock>>>
-				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+				( uor_g, xi1_g, xi2_g, nx, ny, pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
 #else
 		dualTVHuber_gm<<<dimGrid,dimBlock>>>
-				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+				( uor_g, xi1_g, xi2_g, nx, ny, pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
 #endif
 
 
@@ -323,11 +316,13 @@ void computeSuperresolutionUngerGPU
 		std::list<FlowGPU>::iterator flow   = flowsGPU.begin();
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
-				// TODO: KERNEL BACKWARDREGISTRATIONBILINEARVALUE
+				// call backward warping // TODO: check if pitches are correct
+				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
 				
 				if( blur > 0.0f )
 				{
-					// TODO: KERNEL FOR GAUSSBLURSEPARATEMIRROR
+					// blur image
+					gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
 				}
 				else
 				{
@@ -351,7 +346,7 @@ void computeSuperresolutionUngerGPU
 					temp2_g = temp;
 				}
 				
-#ifdef SHARED_MEM
+#if SHARED_MEM
 		dualL1Difference_sm<<<dimGrid,dimBlock>>>
 				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
 #else
@@ -390,7 +385,8 @@ void computeSuperresolutionUngerGPU
 			
 			if( blur > 0.0f )
 			{
-				// TODO: KERNEL FOR GAUSSBLURSEPARATEMIRROR (lookout for change in parameters, if any)
+				// blur image
+				gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
 			}
 			else
 			{
@@ -412,7 +408,7 @@ void computeSuperresolutionUngerGPU
 			addKernel <<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
 		}
 		
-#ifdef SHARED_MEM
+#if SHARED_MEM
 		primal1N_sm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 #else
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
