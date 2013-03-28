@@ -116,7 +116,7 @@ void computeSuperresolutionUngerGPU
 		// TODO: KERNEL FOR DUAL TV
 		// dualTVHuber(_u_overrelaxed,_xi1,_xi2,_nx,_ny,factor_tv_update,factor_tv_clipping,huber_denom_tv,_tau_d);
 
-		// DUAL DATA		
+		// TODO: DUAL DATA (maybe)		
 		
 		// iterating over all images
 		std::vector<float*>::iterator image = images_g.begin();

@@ -75,13 +75,108 @@ __device__ float atomicAdd(float* address, double val)
 // backward warping
 //================================================================
 
-
-void backwardRegistrationBilinearValueTex(const float *in_g,
-		const float *flow1_g, const float *flow2_g, float *out_g, float value,
-		int nx, int ny, int pitchf1_in, int pitchf1_out, float hx, float hy)
+// TODO: change global memory to texture
+__global__ void backwardRegistrationBilinearValueTexKernel (
+		const float* in_g,
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		float value,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
 {
-	// ### Implement me ###
+	// thread coordinates
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	
+	if( x < nx && y < ny )
+	{
+		float hx_1 = 1.0f / hx;
+		float hy_1 = 1.0f / hy;
+	
+		float ii_fp = x + (flow1_g[y * nx + x] * hx_1);
+		float jj_fp = y + (flow2_g[y * nx + x] * hy_1);
+	
+		if( (ii_fp < 0.0f) || (jj_fp < 0.0f)
+					 || (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1)) )
+		{
+			out_g[y*nx+x] = value;
+		}
+		else if( !isfinite( ii_fp ) || !isfinite( jj_fp ) )
+		{
+			//fprintf(stderr,"!");
+			out_g[ y * nx + x] = value;
+		}
+		else
+		{
+			int xx = (int)ii_fp;
+			int yy = (int)jj_fp;
+	
+			int xx1 = xx == nx - 1 ? xx : xx + 1;
+			int yy1 = yy == ny - 1 ? yy : yy + 1;
+	
+			float xx_rest = ii_fp - (float)xx;
+			float yy_rest = jj_fp - (float)yy;
+	
+			out_g[y * nx + x] =
+					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy * nx + xx]
+					+ xx_rest * (1.0f - yy_rest)        * in_g[yy * nx + xx1]
+					+ (1.0f - xx_rest) * yy_rest        * in_g[yy1 * nx + xx]
+					+ xx_rest * yy_rest                 * in_g[yy1 * nx + xx1];
+		}
+	}
 }
+
+
+void backwardRegistrationBilinearValueTex (
+		const float* in_g,		// _u_overrelaxed
+		const float* flow1_g,	// flow->u1
+		const float* flow2_g,	// flow->u2
+		float* out_g,			// _help1
+		float value,			// 0.0f
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,				// 1.0f
+		float hy				// 1.0f
+	)
+{
+	// block and grid size
+	int ngx = ((nx - 1) / LO_BW) + 1;
+	int ngy = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( ngx, ngy );
+	dim3 dimBlock( LO_BW, LO_BH );
+	
+	// TODO: binding of texture
+
+	//call warp method on gpu
+	backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>(
+			in_g,
+			flow1_g,
+			flow2_g,
+			out_g,
+			value,
+			nx,
+			ny,
+			pitchf1_in,
+			pitchf1_out,
+			hx,
+			hy
+		);
+	
+	// TODO: release texture
+}
+
+
+
+
 
 
 
@@ -252,12 +347,152 @@ void forewardRegistrationBilinearAtomic (
 // gaussian blur (mirrored)
 //================================================================
 
-
-void gaussBlurSeparateMirrorGpu(float *in_g, float *out_g, int nx, int ny,
-		int pitchf1, float sigmax, float sigmay, int radius, float *temp_g,
-		float *mask)
+/*
+ * gaussian blur with mirrored border
+ * 
+ * global memory
+ */
+__global__ void gaussBlurSeparateMirrorGpuKernel_global (
+		float* in_g,
+		float* out_g,
+		int nx,
+		int ny,
+		int pitchf1,
+		float sigmax,
+		float sigmay,
+		int radius,
+		float* temp_g,
+		float* mask
+	)
 {
-	// ### Implement me ###
+	// get thread coordinates and index
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	//const unsigned int idx = y * pitchf1 + x;
+	
+	float result, sum;
+
+	// todo: currently assuming that temp_g is given
+	//bool selfalloctemp = temp_g == NULL;
+	//if( selfalloctemp )
+	//	temp_g = new float[nx*ny];
+
+	bool selfallocmask = mask == NULL;
+	if(selfallocmask)
+		mask = new float[radius + 1];
+	
+	sigmax = 1.0f / (sigmax * sigmax);
+	sigmay = 1.0f / (sigmay * sigmay);
+
+	//---------------------
+	// gauss in x direction
+	//---------------------
+
+	// prepare gaussian kernel (1D)
+	// todo: move to shared memory, if computed in threads
+	mask[0] = sum = 1.0f;
+	for( int gx = 1; gx <= radius; ++gx )
+	{
+		mask[gx] = exp( -0.5f * ((float)(gx * gx) * sigmax) );
+		sum += 2.0f * mask[gx];
+	}
+	// normalize kernel
+	for(int gx = 0; gx <= radius; ++gx )
+	{
+		mask[gx] /= sum;
+	}
+
+	// convolution x
+	result = mask[0] * in_g[y * pitchf1 + x];
+
+	for( int i = 1; i <= radius; i++ )
+	{
+		result += mask[i] * (
+				( (x - i >= 0) ? ( in_g[y * pitchf1 + (x - i)] ) : ( in_g[y * pitchf1 + (-1 - (x-i))] ) ) +
+				( (x + i < nx) ? ( in_g[y * pitchf1 + (x + i)] ) : ( in_g[y * pitchf1 + (nx - (x+i - nx-1))]) )
+			);
+	}
+	
+	temp_g[y * pitchf1 + x] = result;
+	
+	//---------------------
+	// gauss in y direction
+	//---------------------
+
+	mask[0] = sum = 1.0f;
+
+	// prepare gaussian kernel (1D)
+	// todo: move to shared memory, if computed in threads
+	for( int gx = 1; gx <= radius; ++gx )
+	{
+		mask[gx] = exp( -0.5f * ( (float)(gx * gx) * sigmay) );
+		sum += 2.0f * mask[gx];
+	}
+	// normalize kernel
+	for(int gx = 0; gx <= radius; ++gx )
+	{
+		mask[gx] /= sum;
+	}
+
+	// convolution y
+	result = mask[0] * temp_g[y * pitchf1 + x];
+
+	for( int i = 1; i <= radius; ++i )
+	{
+		result += mask[i]*(
+				( (y-i >= 0) ? temp_g[(y-i) * pitchf1 + x] : temp_g[(-1 - (y-i)) * pitchf1 + x]) +
+				( (y+i < ny) ? temp_g[(y+i) * pitchf1 + x] : temp_g[(ny - (y+i - ny-1)) * pitchf1 + x])
+			);
+	}
+
+	out_g[y * pitchf1 + x] = result;
+
+
+	// free memory?
+	//if(selfallocmask) delete [] mask;
+	//if(selfalloctemp) delete [] temp;
+}
+
+void gaussBlurSeparateMirrorGpu (
+		float* in_g,
+		float* out_g,
+		int nx,
+		int ny,
+		int pitchf1,
+		float sigmax,
+		float sigmay,
+		int radius,
+		float* temp_g,
+		float* mask
+	)
+{
+	// block and grid size
+	int blocksize_x = ((nx - 1) / LO_BW) + 1;
+	int blocksize_y = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( blocksize_x, blocksize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+
+
+	// todo: necessary? => copy memory? (swaping pointers here not possible)
+	// if( sigmax <= 0.0f || sigmay <= 0.0f || radius < 0 )
+	//	 return;
+	
+	if( radius == 0 )
+	{
+		int maxsigma = (sigmax > sigmay) ? sigmax : sigmay;
+		radius = (int)( 3.0f * maxsigma );
+	}
+	
+	// todo: allocate gpu memory, if necessary (bind texture)
+
+	
+	// todo: try performance with prepared mask
+	
+	// invoke gauss kernel on gpu
+	gaussBlurSeparateMirrorGpuKernel_global <<< dimGrid, dimBlock >>> ( in_g, out_g, nx, ny, pitchf1, sigmax, sigmay, radius, temp_g, mask );
+	
+	// todo: free gpu memory, if necessary
 }
 
 
