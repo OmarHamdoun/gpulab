@@ -657,8 +657,39 @@ void resampleAreaParallelSeparate (
 void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 		int nx_in, int ny_in, int pitchf1_in, int nx_out, int ny_out,
 		int pitchf1_out, float *help_g, float scalefactor)
-{
-	// ### Implement me ###
+{	
+	/*  Here, 
+	 * in_g = q_g[k]   	nx_orig, ny_orig, pitchf1_orig
+	 * out_g = temp1_g 	nx,ny,pitchf1
+	 * (nx_in, ny_in) = ( nx_orig, ny_orig)
+	 * pitchf1_in  = pitchf1_orig
+	 * (nx_out,ny_out) = (nx, ny )
+	 * pitchf1_out = pitchf1
+	 * help_g = temp4_g
+	 * scalefactor = 1.00f (default value)
+	 */
+	
+	// ### Implement me ###		
+	// help_g is already allocated on GPU global memory, no need to check
+	
+	// AM HELL SCARED TO WRITE THIS METHOD DUE TO BLUNDER IN LAST :p STEFAN AN PHILIP, PLZ CROSSCHECK	
+	int xBlocks = ( nx_out % LO_BW ) ? (nx_out / LO_BW) + 1 : (nx_out / LO_BW);
+	int yBlocks = ( ny_in % LO_BH ) ? ( ny_in / LO_BH ) + 1 : ( ny_in / LO_BH );
+	
+	dim3 dimGrid( xBlocks, yBlocks );
+	dim3 dimBlock( LO_BW, LO_BH );
+	
+	float hx = (float)(nx_in)/(float)(nx_out);
+	resampleAreaParallelSeparate_x<<<dimGrid, dimBlock>>>( in_g, help_g, nx_out, ny_in, hx, pitchf1_in, pitchf1_out, 1.0f);
+	//CPU//resampleAreaParallelizableSeparate_x(in,help,nx_out,ny_in,(float)(nx_in)/(float)(nx_out),nx_in,1.0f);
+	
+	yBlocks = ( ny_out % LO_BH ) ? ( ny_out / LO_BH ) + 1 : ( ny_out / LO_BH );
+	dimGrid = dim3( xBlocks, yBlocks );
+	
+	float hy = (float)(ny_in)/(float)(ny_out);
+	
+	resampleAreaParallelSeparate_y<<<dimGrid, dimBlock>>>( help_g, out_g, nx_out, ny_out, hy, pitchf1_out, scalefactor );	
+	//CPU//resampleAreaParallelizableSeparate_y(help,out,nx_out,ny_out,(float)(ny_in)/(float)(ny_out),scalefactor);
 }
 
 
