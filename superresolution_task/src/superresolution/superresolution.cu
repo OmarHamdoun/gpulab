@@ -264,13 +264,13 @@ void computeSuperresolutionUngerGPU
 )
 {
 	// replacing u by u_g ( pointer to resultant data)
-	
+
 	// grid and block dimensions
 	int gridsize_x = ((nx - 1) / SR_BW) + 1;
 	int gridsize_y = ((ny - 1) / SR_BH) + 1;
 	dim3 dimGrid ( gridsize_x, gridsize_y );
 	dim3 dimBlock ( SR_BW, SR_BH );
-	
+
 	// initialise xi1_g and xi2_g to zero
 	setKernel <<<dimGrid, dimBlock>>>( xi1_g, nx, ny, pitchf1, 0.0f );
 	setKernel <<<dimGrid, dimBlock>>>( xi2_g, nx, ny, pitchf1, 0.0f );
@@ -309,16 +309,18 @@ void computeSuperresolutionUngerGPU
 #endif
 
 
-		// TODO: DUAL DATA (maybe)		
+		// DUAL DATA
 		
 		// iterating over all images
 		std::vector<float*>::iterator image = images_g.begin();
 		std::list<FlowGPU>::iterator flow   = flowsGPU.begin();
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
+				saveCudaImage( "beforeBackwardValue.pgm", uor_g, nx, ny, pitchf1, 1, 0.0f, 255.0f );
 				// call backward warping // TODO: check if pitches are correct
-				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
-				
+				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1_orig, pitchf1, 1.0f, 1.0f );
+				saveCudaImage( "afterBackwardValue.pgm", temp1_g, nx, ny, pitchf1, 1, 0.0f, 255.0f );
+
 				if( blur > 0.0f )
 				{
 					// blur image
@@ -414,5 +416,8 @@ void computeSuperresolutionUngerGPU
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 #endif
 
-	}	
+	}
+
+	// TODO remove
+	//exit(0);
 }
