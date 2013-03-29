@@ -488,8 +488,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_x
 		const int		nx,
 		const int		ny,
 		const int		pitchf1,	// pitch for this image
-		const int		radius,		// kernel radius
-		const float*	mask		// kernel
+		const int		radius		// kernel radius
 	)
 {
 	// get thread/pixel coordinates
@@ -504,7 +503,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_x
 		int idx = y * pitchf1 + x;
 
 		// calculate center outside of the loop (otherwise it would be computed twice)		
-		float result = mask[0] * in[idx]; // temp var for output pixel
+		float result = constKernelX[0] * in[idx]; // temp var for output pixel
 		
 		for( int i = 1; i <= radius; ++i )
 		{
@@ -512,7 +511,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_x
 			int xShiftLeft = x - i;
 			int xShiftRight = x + i;
 			
-			result += mask[i] * (
+			result += constKernelX[i] * (
 					// left side of kernel
 					( (xShiftLeft >= 0) ? in[y * pitchf1 + xShiftLeft] : in[y * pitchf1 + (-1 - xShiftLeft) ] ) + // border condition: mirroring
 
@@ -533,8 +532,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_y
 		const int		nx,
 		const int		ny,
 		const int		pitchf1,	// pitch for this image
-		const int		radius,		// kernel radius
-		const float*	mask		// kernel
+		const int		radius		// kernel radius
 	)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -544,14 +542,14 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_y
 	{
 		int idx = y * pitchf1 + x;
 				
-		float result = mask[0] * in[idx];
+		float result = constKernelY[0] * in[idx];
 		
 		for( int i = 1; i <= radius; ++i )
 		{
 			int yShiftLeft = y - i;
 			int yShiftRight = y + i;
 			
-			result += mask[i] * (
+			result += constKernelY[i] * (
 					( (yShiftLeft >= 0) ? in[yShiftLeft * pitchf1 + x] : in[(-1 - yShiftLeft) * pitchf1 + x ] ) + 
 					( (yShiftRight < ny) ? in[yShiftRight * pitchf1 + x] : in[(ny - (yShiftRight - (ny - 1))) * pitchf1 + x ]));
 		}
@@ -565,7 +563,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_y
  *
  * mask is supposed to be a CPU pointer!
  */
-void gaussBlurSeparateMirrorGpu_gm
+void gaussBlurSeparateMirrorGpu
 	(
 		float* 	in_g,		// input image
 		float* 	out_g,		// convoluted output image
@@ -596,12 +594,12 @@ void gaussBlurSeparateMirrorGpu_gm
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 
+	//-----------------------
+	// memory preparation
+	//-----------------------
+
 	// allocate mask memory, if not given
 	bool selfallocmask = mask == 0;
-	if(selfallocmask)
-	{
-		mask = new float[radius + 1];
-	}
 
 	// allocate helper array, if not given
 	bool selfalloctemp = temp_g == NULL;
@@ -610,6 +608,10 @@ void gaussBlurSeparateMirrorGpu_gm
 		int pitchBin; // pitch is the same as pitchf1
 		cuda_malloc2D( (void**)&temp_g, nx, ny, 1, sizeof(float), &pitchBin );
 	}
+
+	//-----------------------
+	// gauss preparation
+	//-----------------------
 	
 	// set radius automatically, if not given
 	if( radius == 0 )
@@ -621,72 +623,80 @@ void gaussBlurSeparateMirrorGpu_gm
 	sigmax = 1.0f / (sigmax * sigmax);
 	sigmay = 1.0f / (sigmay * sigmay);
 
-	// allocate global GPU memory for kernel
-	float* kernel_g;
-	int maskBytes = (radius + 1) * sizeof(float);
-	cutilSafeCall( cudaMalloc ( (void**)&kernel_g, maskBytes ) );
 
-
-	//---------------------
-	// gauss in x direction
-	//---------------------
+	//-----------------------
+	// kernel preparation
+	//-----------------------
 	
-	// prepare gaussian kernel (1D) for x direction
-	float sum = 1.0f;
-	mask[0] = 1.0f;
+	// TODO: test if results stay the same with kept kernels
+	//if( !constant_kernel_bound )
+	//{
+		if(selfallocmask)
+		{
+			mask = new float[radius + 1];
+		}
 
-	for( int x = 1; x <= radius; ++x )
-	{
-		mask[x] = exp( -0.5f * ( (float)(x * x) * sigmax) );
-		sum += 2.0f * mask[x];
-	}
+		// prepare gaussian kernel (1D) for x direction
+		float sum = 1.0f;
+		mask[0] = 1.0f;
 
-	// normalize kernel
-	for( int x = 0; x <= radius; ++x )
-	{
-		mask[x] /= sum;
-	}
+		for( int x = 1; x <= radius; ++x )
+		{
+			mask[x] = exp( -0.5f * ( (float)(x * x) * sigmax) );
+			sum += 2.0f * mask[x];
+		}
 
-	// copy kernel to global memory
-	cutilSafeCall( cudaMemcpy ( kernel_g, mask, maskBytes, cudaMemcpyHostToDevice ) );
+		// normalize kernel
+		for( int x = 0; x <= radius; ++x )
+		{
+			mask[x] /= sum;
+		}
 
-	// invoke gauss kernel on gpu for convolution in x direction
+		// bind kernel to constant memory
+		gpu_bindKernelToConstantMemory_x ( mask, radius + 1 );
+
+		//-----------------------
+		// kernel for y direction
+		//-----------------------
+
+		mask[0] = sum = 1.0f;
+
+		// prepare gaussian kernel (1D)
+		for( int gx = 1; gx <= radius; ++gx )
+		{
+			mask[gx] = exp( -0.5f * ( (float)(gx * gx) * sigmay) );
+			sum += 2.0f * mask[gx];
+		}
+
+		// normalize kernel
+		for( int gx = 0; gx <= radius; ++gx )
+		{
+			mask[gx] /= sum;
+		}
+
+		// bind kernel to constant memory
+		gpu_bindKernelToConstantMemory_y ( mask, radius + 1 );
+
+		constant_kernel_bound = true;
+	//}
+
+	//-----------------------
+	// convolution
+	//-----------------------
+
+
+	// invoke gauss kernels on gpu for convolution in x and y direction
 	// MAXKERNELSIZE and MAXKERNELRADIUS do not allow to combine x and y in one kernel
-	gaussBlurSeparateMirrorGPU_gm_x<<<dimGrid,dimBlock>>>( in_g, temp_g, nx, ny, pitchf1, radius, kernel_g );
+	gaussBlurSeparateMirrorGPU_gm_x<<<dimGrid,dimBlock>>>( in_g, temp_g, nx, ny, pitchf1, radius );
+	gaussBlurSeparateMirrorGPU_gm_y<<<dimGrid,dimBlock>>>( temp_g, out_g, nx, ny, pitchf1, radius );
 
-	//---------------------
-	// gauss in y direction
-	//---------------------
-
-	mask[0] = sum = 1.0f;
-
-	// prepare gaussian kernel (1D)
-	for( int gx = 1; gx <= radius; ++gx )
-	{
-		mask[gx] = exp( -0.5f * ( (float)(gx * gx) * sigmay) );
-		sum += 2.0f * mask[gx];
-	}
-
-	// normalize kernel
-	for( int gx = 0; gx <= radius; ++gx )
-	{
-		mask[gx] /= sum;
-	}
-	
-	// copy kernel to global memory
-	cutilSafeCall( cudaMemcpy ( kernel_g, mask, maskBytes, cudaMemcpyHostToDevice ) );
-
-	// invoke gauss kernel on gpu for convolution in y direction
-	gaussBlurSeparateMirrorGPU_gm_y<<<dimGrid,dimBlock>>>( temp_g, out_g, nx, ny, pitchf1, radius, kernel_g );
+	//-----------------------
+	// cleanup
+	//-----------------------
 	
 	// free self allocated memory
 	if( selfallocmask )
-	{
 		delete [] mask;
-	}
-
-	// free kernel memory
-	cutilSafeCall( cudaFree( kernel_g ) );
 
 	if( selfalloctemp )
 		cutilSafeCall( cudaFree( temp_g ) );
@@ -796,7 +806,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
  *
  * mask is supposed to be a CPU pointer!
  */
-void gaussBlurSeparateMirrorGpu
+void gaussBlurSeparateMirrorGpu_tex_cm
 	(
 		float* 	in_g,		// input image
 		float* 	out_g,		// convoluted output image
