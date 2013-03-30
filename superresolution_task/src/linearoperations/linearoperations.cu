@@ -40,16 +40,12 @@ bool constant_kernel_bound = false;
 
 void gpu_bindKernelToConstantMemory_x ( const float* kernel_x, const int size ) 
 {
-	fprintf( stderr, "\n\nBINDING CONSTANT MEMORY..." );
 	cutilSafeCall( cudaMemcpyToSymbol( constKernelX, kernel_x, size * sizeof(float) ) );
-	fprintf( stderr, "\n\nCONSTANT MEMORY BOUND" );
 }
 
 void gpu_bindKernelToConstantMemory_y ( const float* kernel_y, const int size ) 
 {
-	fprintf( stderr, "\n\nBINDING CONSTANT MEMORY..." );
 	cutilSafeCall( cudaMemcpyToSymbol( constKernelY, kernel_y, size * sizeof(float) ) );
-	fprintf( stderr, "\n\nCONSTANT MEMORY BOUND" );
 }
 
 // TEXTURE METHODS
@@ -122,6 +118,10 @@ __device__ float atomicAdd(float* address, double val)
 //================================================================
 
 // TODO: change global memory to texture
+/*
+ * Texture is faster than global memory, as memory access may be random
+ * Access locations depending on flow direction
+ */
 __global__ void backwardRegistrationBilinearValueTexKernel (
 		const float* in_g,
 		const float* flow1_g,
@@ -145,18 +145,18 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 		float hx_1 = 1.0f / hx;
 		float hy_1 = 1.0f / hy;
 	
-		float ii_fp = x + (flow1_g[y * nx + x] * hx_1);
-		float jj_fp = y + (flow2_g[y * nx + x] * hy_1);
+		float ii_fp = x + (flow1_g[y * pitchf1_in + x] * hx_1);
+		float jj_fp = y + (flow2_g[y * pitchf1_in + x] * hy_1);
 	
 		if( (ii_fp < 0.0f) || (jj_fp < 0.0f)
 					 || (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1)) )
 		{
-			out_g[y*nx+x] = value;
+			out_g[y * pitchf1_out + x] = value;
 		}
 		else if( !isfinite( ii_fp ) || !isfinite( jj_fp ) )
 		{
 			//fprintf(stderr,"!");
-			out_g[ y * nx + x] = value;
+			out_g[ y * pitchf1_out + x] = value;
 		}
 		else
 		{
@@ -169,11 +169,11 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 			float xx_rest = ii_fp - (float)xx;
 			float yy_rest = jj_fp - (float)yy;
 	
-			out_g[y * nx + x] =
-					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy * nx + xx]
-					+ xx_rest * (1.0f - yy_rest)        * in_g[yy * nx + xx1]
-					+ (1.0f - xx_rest) * yy_rest        * in_g[yy1 * nx + xx]
-					+ xx_rest * yy_rest                 * in_g[yy1 * nx + xx1];
+			out_g[y * pitchf1_out + x] =
+					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy  * pitchf1_in + xx]
+					+ xx_rest * (1.0f - yy_rest)        * in_g[yy  * pitchf1_in + xx1]
+					+ (1.0f - xx_rest) * yy_rest        * in_g[yy1 * pitchf1_in + xx]
+					+ xx_rest * yy_rest                 * in_g[yy1 * pitchf1_in + xx1];
 		}
 	}
 }

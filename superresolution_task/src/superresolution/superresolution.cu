@@ -31,7 +31,6 @@
 
 #include <auxiliary/debug.hpp>
 
-
 #ifdef DGT400
 #define SR_BW 32
 #define SR_BH 16
@@ -316,10 +315,8 @@ void computeSuperresolutionUngerGPU
 		std::list<FlowGPU>::iterator flow   = flowsGPU.begin();
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
-				saveCudaImage( "beforeBackwardValue.pgm", uor_g, nx, ny, pitchf1, 1, 0.0f, 255.0f );
-				// call backward warping // TODO: check if pitches are correct
+				// call backward warping
 				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1_orig, pitchf1, 1.0f, 1.0f );
-				saveCudaImage( "afterBackwardValue.pgm", temp1_g, nx, ny, pitchf1, 1, 0.0f, 255.0f );
 
 				if( blur > 0.0f )
 				{
@@ -417,7 +414,4 @@ void computeSuperresolutionUngerGPU
 #endif
 
 	}
-
-	// TODO remove
-	//exit(0);
 }
