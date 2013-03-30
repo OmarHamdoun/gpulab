@@ -19,6 +19,7 @@
 
 #include <auxiliary/cuda_basic.cuh>
 #include <iostream>
+#include <linearoperations/linearoperations.cuh>
 
 #define SHARED_MEM 0
 
@@ -387,50 +388,50 @@ __global__ void foreward_warp_kernel_atomic (
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const unsigned int idx = y * pitchf1 + x;
-			
-	// reset shared memory to zero
-	out_g[idx] = 0.0f;
-		
-	// calculate target coordinates: coords + flow values
-	const float xx = (float)x + flow1_g[idx];
-	const float yy = (float)y + flow2_g[idx];
 	
-	// continue only if target area inside image
-	if(
-			xx >= 0.0f &&
-			xx <= (float)(nx - 2) &&
-			yy >= 0.0f &&
-			yy <= (float)(ny - 2))
+	if( x < nx && y < ny )
 	{
-		float xxf = floor(xx);
-		float yyf = floor(yy);
 		
-		// target pixel coordinates
-		const int xxi = (int)xxf;
-		const int yyi = (int)yyf;
+		// calculate target coordinates: coords + flow values
+		const float xx = (float)x + flow1_g[idx];
+		const float yy = (float)y + flow2_g[idx];
+	
+		// continue only if target area inside image
+		if (
+				xx >= 0.0f &&
+				xx <= (float)(nx - 2) &&
+				yy >= 0.0f &&
+				yy <= (float)(ny - 2)
+			)
+		{
+			float xxf = floor(xx);
+			float yyf = floor(yy);
 		
-		xxf = xx - xxf;
-		yyf = yy - yyf;
+			// target pixel coordinates
+			const int xxi = (int)xxf;
+			const int yyi = (int)yyf;
 		
-		// distribute input pixel value to adjacent pixels of target pixel
-		float out_xy   = in_g[idx] * (1.0f - xxf) * (1.0f - yyf);
-		float out_x1y  = in_g[idx] * xxf * (1.0f - yyf);
-		float out_xy1  = in_g[idx] * (1.0f - xxf) * yyf;
-		float out_x1y1 = in_g[idx] * xxf * yyf;		
+			xxf = xx - xxf;
+			yyf = yy - yyf;
+		
+			// distribute input pixel value to adjacent pixels of target pixel
+			float out_xy   = in_g[idx] * (1.0f - xxf) * (1.0f - yyf);
+			float out_x1y  = in_g[idx] * xxf * (1.0f - yyf);
+			float out_xy1  = in_g[idx] * (1.0f - xxf) * yyf;
+			float out_x1y1 = in_g[idx] * xxf * yyf;		
 				
-		// eject the warp core!
-		// avoid race conditions by use of atomic operations
-		atomicAdd( out_g + (yyi * nx + xxi),           out_xy );
-		atomicAdd( out_g + (yyi * nx + xxi + 1),       out_x1y );
-		atomicAdd( out_g + ((yyi + 1) * nx + xxi),     out_xy1 );
-		atomicAdd( out_g + ((yyi + 1) * nx + xxi + 1), out_x1y1 );
-		
-		// TODO: think about hierarchical atomics
-		// problem: target coordinates can be anywhere on image,
-		// so shared memory per block is limited reasonable
-		
-	}
+			// eject the warp core!
+			// avoid race conditions by use of atomic operations
+			atomicAdd( out_g + (yyi * pitchf1 + xxi),           out_xy );
+			atomicAdd( out_g + (yyi * pitchf1 + xxi + 1),       out_x1y );
+			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi),     out_xy1 );
+			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi + 1), out_x1y1 );
 
+			// TODO: think about hierarchical atomics
+			// problem: target coordinates can be anywhere on image,
+			// so shared memory per block is limited reasonable	
+		}
+	}
 }
 
 
@@ -454,6 +455,10 @@ void forewardRegistrationBilinearAtomic (
 
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
+
+	// reset target array
+	// this cost us hours again, not to do it in the warpi kernel... 
+	setKernel <<< dimGrid, dimBlock >>> ( out_g, nx, ny, pitchf1, 0.0f );
 
 	// invoke atomic warp kernel on gpu
 	foreward_warp_kernel_atomic <<< dimGrid, dimBlock >>> ( flow1_g, flow2_g, in_g, out_g, nx, ny, pitchf1 );

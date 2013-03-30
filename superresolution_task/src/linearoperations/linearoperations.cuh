@@ -171,6 +171,20 @@ void gaussBlurSeparateMirrorGpu
 		float *mask
 );
 
+void gaussBlurSeparateMirrorGpu_gm
+(
+		float *in_g,
+		float *out_g,
+		int   nx,
+		int   ny,
+		int   pitchf1,
+		float sigmax,
+		float sigmay,
+		int   radius,
+		float *temp_g,
+		float *mask
+);
+
 /*!
  * @brief Resamples an Image in X and Y separatly, without other running
  * variables than x and y
@@ -282,6 +296,8 @@ __global__ void setKernel
 );
 
 
+// TODO: remove
+__global__ void debugKernel( float *field_g, int nx, int ny, int pitchf1 );
 
 #endif
 
