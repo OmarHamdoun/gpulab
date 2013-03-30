@@ -41,6 +41,8 @@
 
 //shared mem flags
 #define SHARED_MEM 0
+#define GAUSS_TEXTURE_MEM 1
+#define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
 
 #include <linearoperations/linearoperations.h>
 
@@ -304,7 +306,7 @@ __global__ void dualTVHuber_gm
 }
 
 //TODO write comment
-// shared memory version of dualTVHuber
+// shared memory version of primal1N
 __global__ void dualTVHuber_sm
 (
 		float 	*uor_g,								// Field of overrelaxed primal variables
@@ -462,12 +464,20 @@ void computeSuperresolutionUngerGPU
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
 				// call backward warping
+#if BACKWARDSWARPING_VALUE_TEXTURE_MEM
 				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+#else
+				backwardRegistrationBilinearValueTex_gm ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+#endif
 
 				if( blur > 0.0f )
 				{
 					// blur image
+#if GAUSS_TEXTURE_MEM
 					gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#else
+					gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#endif
 				}
 				else
 				{
@@ -537,7 +547,13 @@ void computeSuperresolutionUngerGPU
 			if( blur > 0.0f )
 			{
 				// blur image
+
+#if GAUSS_TEXTURE_MEM
 				gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#else
+				gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#endif
+
 			}
 			else
 			{
