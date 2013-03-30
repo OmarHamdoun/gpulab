@@ -1091,7 +1091,7 @@ void resampleAreaParallelSeparate (
 		float scalefactor
 	)
 {
-	// helper array is already allocated on the GPU as _b1, now help_g
+	// TODO: add allocation of help_g, if not allocated	
 
 	// can reduce no of blocks for first pass
 	int gridsize_x = ((nx_out - 1) / LO_BW) + 1;
@@ -1116,6 +1116,8 @@ void resampleAreaParallelSeparate (
 	
 	resampleAreaParallelSeparate_y<<< dimGrid, dimBlock >>>( help_g, out_g, nx_out, ny_out,
 			hy, pitchf1_out, factor );
+
+	// TODO: free help_g if self allocated
 }
 
 //================================================================
@@ -1137,27 +1139,28 @@ void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 	 * scalefactor = 1.00f (default value)
 	 */
 	
-	// ### Implement me ###		
-	// help_g is already allocated on GPU global memory, no need to check
+	// TODO: add allocation of help_g, if not allocated	
 	
 	// AM HELL SCARED TO WRITE THIS METHOD DUE TO BLUNDER IN LAST :p STEFAN AN PHILIP, PLZ CROSSCHECK	
-	int xBlocks = ( nx_out % LO_BW ) ? (nx_out / LO_BW) + 1 : (nx_out / LO_BW);
-	int yBlocks = ( ny_in % LO_BH ) ? ( ny_in / LO_BH ) + 1 : ( ny_in / LO_BH );
+	int gridsize_x = ( nx_out % LO_BW ) ? (nx_out / LO_BW) + 1 : (nx_out / LO_BW);
+	int gridsize_y = ( ny_in % LO_BH ) ? ( ny_in / LO_BH ) + 1 : ( ny_in / LO_BH );
 	
-	dim3 dimGrid( xBlocks, yBlocks );
+	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
 	float hx = (float)(nx_in)/(float)(nx_out);
 	resampleAreaParallelSeparate_x<<<dimGrid, dimBlock>>>( in_g, help_g, nx_out, ny_in, hx, pitchf1_in, pitchf1_out, 1.0f);
 	//CPU//resampleAreaParallelizableSeparate_x(in,help,nx_out,ny_in,(float)(nx_in)/(float)(nx_out),nx_in,1.0f);
 	
-	yBlocks = ( ny_out % LO_BH ) ? ( ny_out / LO_BH ) + 1 : ( ny_out / LO_BH );
-	dimGrid = dim3( xBlocks, yBlocks );
+	gridsize_y = ( ny_out % LO_BH ) ? ( ny_out / LO_BH ) + 1 : ( ny_out / LO_BH );
+	dimGrid = dim3( gridsize_x, gridsize_y );
 	
 	float hy = (float)(ny_in)/(float)(ny_out);
 	
 	resampleAreaParallelSeparate_y<<<dimGrid, dimBlock>>>( help_g, out_g, nx_out, ny_out, hy, pitchf1_out, scalefactor );	
 	//CPU//resampleAreaParallelizableSeparate_y(help,out,nx_out,ny_out,(float)(ny_in)/(float)(ny_out),scalefactor);
+
+	// TODO: free help_g if self allocated
 }
 
 

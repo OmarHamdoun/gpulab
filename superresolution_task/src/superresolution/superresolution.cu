@@ -51,121 +51,132 @@ extern __shared__ float smem[];
 // global memory version of dualL1Difference
 __global__ void dualL1Difference_gm
 (
-    const float *primal,
-    const float *constant,
-    float *dual,
-    int nx,
-    int ny,
-    int pitch,
-    float factor_update,
-    float factor_clipping,
-    float huber_denom,
-    float tau_d
-    )
+	const float *primal,
+	const float *constant,
+	float *dual,
+	int nx,
+	int ny,
+	int pitch,
+	float factor_update,
+	float factor_clipping,
+	float huber_denom,
+	float tau_d
+)
 {
-  const int x = threadIdx.x + blockDim.x * blockIdx.x;
-  const int y = threadIdx.y + blockDim.y * blockIdx.y;
-  if (x < nx && y < ny)
-  {
-    int idx = x + pitch * y;
-    dual[idx] = (dual[idx] + tau_d * factor_update * (primal[idx] - constant[idx]))
-    		    / huber_denom;
-    if (dual[idx] < -factor_clipping)
-    {
-    	dual[idx] = -factor_clipping;
-    }
+	const int x = threadIdx.x + blockDim.x * blockIdx.x;
+	const int y = threadIdx.y + blockDim.y * blockIdx.y;
+	
+	if (x < nx && y < ny)
+	{
+		int idx = x + pitch * y;
+		dual[idx] = (dual[idx] + tau_d * factor_update * (primal[idx] - constant[idx])) / huber_denom;
+		
+		if (dual[idx] < -factor_clipping)
+		{
+			dual[idx] = -factor_clipping;
+		}
 
-    if (dual[idx] > factor_clipping)
-    {
-    	dual[idx] = factor_clipping;
-    }
-  }
+		if (dual[idx] > factor_clipping)
+		{
+			dual[idx] = factor_clipping;
+		}
+	}
 }
 
 //TODO write comment
 // shared memory version of primal1N
 __global__ void dualL1Difference_sm
-(
-    const float *primal,
-    const float *constant,
-    float *dual,
-    int nx,
-    int ny,
-    int pitch,
-    float factor_update,
-    float factor_clipping,
-    float huber_denom,
-    float tau_d
+	(
+		const float *primal,
+		const float *constant,
+		float *dual,
+		int nx,
+		int ny,
+		int pitch,
+		float factor_update,
+		float factor_clipping,
+		float huber_denom,
+		float tau_d
     )
 {
-  const int x = threadIdx.x + blockDim.x * blockIdx.x;
-  const int y = threadIdx.y + blockDim.y * blockIdx.y;
-  if (x < nx && y < ny)
-  {
-	  //TODO implement
-  }
+	const int x = threadIdx.x + blockDim.x * blockIdx.x;
+	const int y = threadIdx.y + blockDim.y * blockIdx.y;
+
+	if (x < nx && y < ny)
+	{
+		//TODO implement
+	}
 }
 
 //TODO write comment
 // global memory version of primal1N
 __global__ void primal1N_gm
-(
-    const float *xi1,
-    const float *xi2,
-    const float *degraded,
-    float *u,
-    float *uor,
-    int nx,
-    int ny,
-    int pitch,
-    float factor_tv_update,
-    float factor_degrade_update,
-    float tau_p,
-    float overrelaxation
-    )
+	(
+		const float *xi1,
+		const float *xi2,
+		const float *degraded,
+		float *u,
+		float *uor,
+		int nx,
+		int ny,
+		int pitch,
+		float factor_tv_update,
+		float factor_degrade_update,
+		float tau_p,
+		float overrelaxation
+	)
 {
   const int x = threadIdx.x + blockDim.x * blockIdx.x;
   const int y = threadIdx.y + blockDim.y * blockIdx.y;
-  if (x < nx && y < ny)
-  {
-    const int idx = y * pitch + x;
-    float u_old = u[idx];
-    float u_new = u[idx] + tau_p *
-        (factor_tv_update * (xi1[idx] - (x == 0 ? 0.0f : xi1[idx - 1]) + xi2[idx] - (y == 0 ? 0.0f : xi2[idx - nx]))
-            - factor_degrade_update * degraded[idx]);
-    u[idx] = u_new;
-    uor[idx] = overrelaxation * u_new + (1.0f - overrelaxation) * u_old;
-  }
+
+	if( x < nx && y < ny )
+	{
+		const int idx = y * pitch + x;
+
+		float u_old = u[idx];
+		
+		float u_new = u[idx] + tau_p *
+			(
+				factor_tv_update *
+				(xi1[idx] - ( x == 0 ? 0.0f : xi1[idx - 1] ) + xi2[idx] - ( y == 0 ? 0.0f : xi2[idx - pitch] )) - 
+				factor_degrade_update * degraded[idx]
+			);
+
+		// write back to output image
+		u[idx] = u_new;
+		uor[idx] = overrelaxation * u_new + (1.0f - overrelaxation) * u_old;
+	}
 }
 
 __global__ void primal1N_sm
-(
-    const float *xi1,
-    const float *xi2,
-    const float *degraded,
-    float *u,
-    float *uor,
-    int nx,
-    int ny,
-    int pitch,
-    float factor_tv_update,
-    float factor_degrade_update,
-    float tau_p,
-    float overrelaxation
+	(
+		const float *xi1,
+		const float *xi2,
+		const float *degraded,
+		float *u,
+		float *uor,
+		int nx,
+		int ny,
+		int pitch,
+		float factor_tv_update,
+		float factor_degrade_update,
+		float tau_p,
+		float overrelaxation
     )
 {
-  const int x = threadIdx.x + blockDim.x * blockIdx.x;
-  const int y = threadIdx.y + blockDim.y * blockIdx.y;
-  if (x < nx && y < ny)
-  {
-   //TODO implement me
-  }
+	const int x = threadIdx.x + blockDim.x * blockIdx.x;
+	const int y = threadIdx.y + blockDim.y * blockIdx.y;
+
+	if (x < nx && y < ny)
+	{
+		//TODO implement me
+	}
 }
 
 //TODO write comment
 // global memory version of primal1N
 __global__ void dualTVHuber_gm
-(
+	(
 		float 	*uor_g,								// Field of overrelaxed primal variables
 		float 	*xi1_g, 							// Dual Variable for TV regularization in X direction
 		float 	*xi2_g,								// Dual Variable for TV regularization in Y direction
@@ -176,7 +187,7 @@ __global__ void dualTVHuber_gm
 		float   factor_clipping,
 		float   huber_denom,
 		float   tau_d
-)
+	)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -195,8 +206,8 @@ __global__ void dualTVHuber_gm
 	
 		const int p = y * pitchf1 + x;
 		
-		float dx = (xi1_g[p] + tau_d * factor_update * (uor_g[y*pitchf1+x1] - uor_g[p])) /huber_denom;
-		float dy = (xi2_g[p] + tau_d * factor_update * (uor_g[y1*pitchf1+x] - uor_g[p])) /huber_denom;
+		float dx = (xi1_g[p] + tau_d * factor_update * (uor_g[y*pitchf1+x1] - uor_g[p])) / huber_denom;
+		float dy = (xi2_g[p] + tau_d * factor_update * (uor_g[y1*pitchf1+x] - uor_g[p])) / huber_denom;
 		float denom = sqrtf( dx * dx + dy * dy ) / factor_clipping;
 		
 		if(denom < 1.0f) denom = 1.0f;
@@ -294,11 +305,12 @@ void computeSuperresolutionUngerGPU
 	float factor_tv_clipping      = factor_tv / factor_tv_update;
 	float huber_denom_tv          = 1.0f + huber_epsilon * tau_d / factor_tv;
 	
-	for(int i=0;i<oi;i++)
+	for( int i = 0; i < oi; ++i )
 	{
 		fprintf(stderr," %i",i);
 
 		// calculate dual tv
+
 #if SHARED_MEM
 		dualTVHuber_sm<<<dimGrid,dimBlock>>>
 				( uor_g, xi1_g, xi2_g, nx, ny, pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
@@ -366,14 +378,12 @@ void computeSuperresolutionUngerGPU
 		{
 			if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 			{
-				// TODO: WRITE KERNEL resampleAreaParallelizableSeparateAdjoined
-				//CPU// resampleAreaParallelizableSeparateAdjoined(_q[k],_help1,_nx_orig,_ny_orig,_nx,_ny,_help4);
-				
 				/*
 				 *  Assuming it resamples a image from q_g[k] from size nx_orig*ny_orig(pitch- pitchf1_orig) to
 				 *  new size nx*ny (pitch- pitchf1) and stores it in temp1_g with the help of helper array
 				 *  temp4_g. The image in temp1_g is then used for gaussian Blurring
 				 */
+
 				resampleAreaParallelSeparateAdjoined( q_g[k], temp1_g, nx_orig, ny_orig, pitchf1_orig, nx, ny, pitchf1, temp4_g );
 			}
 			else
@@ -406,12 +416,11 @@ void computeSuperresolutionUngerGPU
 			// add 1st to 3rd helper array
 			addKernel <<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
 		}
-		
+	
 #if SHARED_MEM
 		primal1N_sm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 #else
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 #endif
-
 	}
 }
