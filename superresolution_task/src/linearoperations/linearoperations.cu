@@ -21,8 +21,6 @@
 #include <iostream>
 #include <linearoperations/linearoperations.cuh>
 
-#define SHARED_MEM 0
-
 // TEXTURES
 
 #define TEXTURE_OFFSET      0.5f  // offset for indexing textures
@@ -115,16 +113,14 @@ __device__ float atomicAdd(float* address, double val)
 #endif
 
 //================================================================
-// backward warping
+// backward warping value
 //================================================================
 
-// TODO: change global memory to texture
 /*
  * Texture is faster than global memory, as memory access may be random
  * Access locations depending on flow direction
  */
 __global__ void backwardRegistrationBilinearValueTexKernel (
-		const float* in_g,
 		const float* flow1_g,
 		const float* flow2_g,
 		float* out_g,
@@ -146,21 +142,21 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 		float hx_1 = 1.0f / hx;
 		float hy_1 = 1.0f / hy;
 	
+		// get target area, where flow points at
 		float ii_fp = x + (flow1_g[y * pitchf1_in + x] * hx_1);
 		float jj_fp = y + (flow2_g[y * pitchf1_in + x] * hy_1);
 	
-		if( (ii_fp < 0.0f) || (jj_fp < 0.0f)
+		// set result to a given value, if the flow points outside the image or is not a number
+		if( (ii_fp < 0.0f) || (jj_fp < 0.0f || !isfinite( ii_fp ) || !isfinite( jj_fp ) )
 					 || (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1)) )
 		{
 			out_g[y * pitchf1_out + x] = value;
 		}
-		else if( !isfinite( ii_fp ) || !isfinite( jj_fp ) )
-		{
-			//fprintf(stderr,"!");
-			out_g[ y * pitchf1_out + x] = value;
-		}
 		else
 		{
+			// get output value by taking the 4 pixel surround the taget point into account
+
+			// left and upper pixel coordinates
 			int xx = (int)ii_fp;
 			int yy = (int)jj_fp;
 	
@@ -171,14 +167,57 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 			float yy_rest = jj_fp - (float)yy;
 	
 			out_g[y * pitchf1_out + x] =
-					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy  * pitchf1_in + xx]
-					+ xx_rest * (1.0f - yy_rest)        * in_g[yy  * pitchf1_in + xx1]
-					+ (1.0f - xx_rest) * yy_rest        * in_g[yy1 * pitchf1_in + xx]
-					+ xx_rest * yy_rest                 * in_g[yy1 * pitchf1_in + xx1];
+					(1.0f - xx_rest) * (1.0f - yy_rest) * tex2D( tex_linearoperation, xx, yy )
+					+ xx_rest * (1.0f - yy_rest)        * tex2D( tex_linearoperation, xx1, yy )
+					+ (1.0f - xx_rest) * yy_rest        * tex2D( tex_linearoperation, xx, yy1 )
+					+ xx_rest * yy_rest                 * tex2D( tex_linearoperation, xx1, yy1 );
 		}
 	}
 }
 
+/*
+ * Texture memory version
+ */
+void backwardRegistrationBilinearValueTex (
+		float* in_g,			// _u_overrelaxed
+		const float* flow1_g,	// flow->u1
+		const float* flow2_g,	// flow->u2
+		float* out_g,			// _help1
+		float value,			// 0.0f
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,				// 1.0f
+		float hy				// 1.0f
+	)
+{
+	// block and grid size
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( gridsize_x, gridsize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+	
+	// TODO: has texture to be bound every time?
+
+	// prepare texture
+	setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+
+	// bind input image to texture
+	gpu_bindTextureMemory( in_g, nx, ny, pitchf1_in * sizeof(float) );
+
+	backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>
+		( flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
+
+	// release texture
+	gpu_unbindTextureMemory();
+
+}
+
+
+
+// using global memory
 __global__ void backwardRegistrationBilinearValueTexKernel_gm
 	(
 		const float* in_g,
@@ -233,8 +272,10 @@ __global__ void backwardRegistrationBilinearValueTexKernel_gm
 	}
 }
 
-
-void backwardRegistrationBilinearValueTex (
+/*
+ * Global memory version for speed comparison
+ */
+void backwardRegistrationBilinearValueTex_gm (
 		const float* in_g,		// _u_overrelaxed
 		const float* flow1_g,	// flow->u1
 		const float* flow2_g,	// flow->u2
@@ -255,48 +296,16 @@ void backwardRegistrationBilinearValueTex (
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
-
-
-#if SHARED_MEM
-		// TODO: binding of texture
-
-		backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>(
-				in_g,
-				flow1_g,
-				flow2_g,
-				out_g,
-				value,
-				nx,
-				ny,
-				pitchf1_in,
-				pitchf1_out,
-				hx,
-				hy
-			);
-
-		// TODO: release texture
-#else
-		backwardRegistrationBilinearValueTexKernel_gm<<<dimGrid, dimBlock>>>(
-				in_g,
-				flow1_g,
-				flow2_g,
-				out_g,
-				value,
-				nx,
-				ny,
-				pitchf1_in,
-				pitchf1_out,
-				hx,
-				hy
-			);
-#endif
-
+	backwardRegistrationBilinearValueTexKernel_gm<<<dimGrid, dimBlock>>>
+			( in_g, flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
 }
 
 
 
 
-
+//================================================================
+// backward warping
+//================================================================
 
 
 // gpu warping kernel
@@ -933,6 +942,7 @@ void gaussBlurSeparateMirrorGpu
 	// convolution
 	//-----------------------
 
+// TODO: change to 0,1 and update kernels
 	// prepare texture
 	setTexturesLinearOperations( 1, 1 ); // filter mode: point (no offset necessary), address mode: mirror
 

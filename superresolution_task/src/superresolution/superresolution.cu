@@ -42,6 +42,7 @@
 //shared mem flags
 #define SHARED_MEM 0
 #define GAUSS_TEXTURE_MEM 1
+#define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
 
 #include <linearoperations/linearoperations.h>
 
@@ -413,7 +414,11 @@ void computeSuperresolutionUngerGPU
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
 				// call backward warping
+#if BACKWARDSWARPING_VALUE_TEXTURE_MEM
 				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+#else
+				backwardRegistrationBilinearValueTex_gm ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+#endif
 
 				if( blur > 0.0f )
 				{
