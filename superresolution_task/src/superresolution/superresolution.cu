@@ -24,11 +24,12 @@
 #include <vector>
 #include <list>
 
+#include <sstream>
+#include <string.h>
+
 //#include <linearoperations.cuh>
 #include <linearoperations/linearoperations.cuh>
-
 #include "superresolution_definitions.h"
-
 #include <auxiliary/debug.hpp>
 
 #ifdef DGT400
@@ -41,6 +42,10 @@
 
 //shared mem flags
 #define SHARED_MEM 0
+
+#define TIME_DEBUG 1
+#define IMAGE_DEBUG 1
+char*  cudaDebug = "";
 
 #include <linearoperations/linearoperations.h>
 
@@ -273,6 +278,9 @@ void computeSuperresolutionUngerGPU
 		int   debug								// Debug Flag, if activated the class produces Debug output.
 )
 {
+    #if TIME_DEBUG
+	  fprintf(stderr,"\n computeSuperresolutionUngerGPU");
+    #endif
 	// replacing u by u_g ( pointer to resultant data)
 
 	// grid and block dimensions
@@ -307,7 +315,9 @@ void computeSuperresolutionUngerGPU
 	
 	for( int i = 0; i < oi; ++i )
 	{
-		fprintf(stderr," %i",i);
+      #if TIME_DEBUG
+		fprintf(stderr,"\n outer interation %i",i);
+	  #endif
 
 		// calculate dual tv
 
@@ -319,6 +329,15 @@ void computeSuperresolutionUngerGPU
 				( uor_g, xi1_g, xi2_g, nx, ny, pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
 #endif
 
+         #if DEBUG
+		     char* cudaDebug = "debug/uor_g.png";
+		     saveCudaImage(cudaDebug,uor_g, nx, ny, pitchf1, 1);
+
+	      float *f = (float*)(*image);
+         cudaDebug = "debug/image.png";
+         saveCudaImage(cudaDebug, f, nx_orig, ny_orig, pitchf1_orig, 1);
+       #endif
+
 		// DUAL DATA
 		
 		// iterating over all images
@@ -326,13 +345,42 @@ void computeSuperresolutionUngerGPU
 		std::list<FlowGPU>::iterator flow   = flowsGPU.begin();
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
+
+				#if TIME_DEBUG
+						fprintf(stderr,"\n image interation %i",k);
+				#endif
+
+
+				#if IMAGE_DEBUG
+					float *f = (float*)(*image);
+					cudaDebug = "debug/image.png";
+					saveCudaImage(cudaDebug, f, nx_orig, ny_orig, pitchf1_orig, 1);
+
+					cudaDebug = "debug/uor_g.png";
+					saveCudaImage(cudaDebug, uor_g, nx, ny, pitchf1, 1);
+				#endif
+
+
+
+
 				// call backward warping
 				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+
+                #if IMAGE_DEBUG
+				  cudaDebug = "debug/warped_uor_g.png";
+				  saveCudaImage(cudaDebug, temp1_g, nx, ny, pitchf1, 1);
+			    #endif
 
 				if( blur > 0.0f )
 				{
 					// blur image
 					gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+
+					#if IMAGE_DEBUG
+						cudaDebug = "debug/gauss.png";
+						saveCudaImage(cudaDebug, temp2_g, nx, ny, pitchf1, 1);
+					#endif
+
 				}
 				else
 				{
@@ -372,6 +420,17 @@ void computeSuperresolutionUngerGPU
 					          factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
 #endif
 
+#if IMAGE_DEBUG
+	     // float *f = (float*)(*image);
+       cudaDebug = "debug/endimage.png";
+       saveCudaImage(cudaDebug, temp1_g, nx_orig, ny_orig, pitchf1_orig, 1);
+	#endif
+
+
+
+		fprintf(stderr,"\n outer backwardRegistrationBilinearValueTex2 %i",oi);
+
+		if(i == 5)return;
 		}
 		
 		// set 3rd helper array to zero

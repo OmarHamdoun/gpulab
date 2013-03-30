@@ -297,6 +297,15 @@ void SuperResolutionUngerCPU::compute()
 			}
 
 			dualL1Difference(_help1,f,_q[k],_nx_orig,_ny_orig,factor_degrade_update,factor_degrade_clipping,huber_denom_degrade,_tau_d);
+
+#if 1
+	     // float *f = (float*)(*image);
+       char* cudaDebug = "debug/cppendimage.png";
+       saveFloatImage(cudaDebug, _help1, _nx_orig, _ny_orig, 1);
+	#endif
+
+
+   	if(i == 5)return;
 			k++;
 			flow++;
 			image++;
