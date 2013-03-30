@@ -1,5 +1,5 @@
 /****************************************************************************\
-*      --- Practical Course: GPU Programming in Computer Vision ---
+ *      --- Practical Course: GPU Programming in Computer Vision ---
  *
  * time:    winter term 2012/13 / March 11-18, 2013
  *
@@ -569,7 +569,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_y
  *
  * mask is supposed to be a CPU pointer!
  */
-void gaussBlurSeparateMirrorGpu
+void gaussBlurSeparateMirrorGpu_gm
 	(
 		float* 	in_g,		// input image
 		float* 	out_g,		// convoluted output image
@@ -634,9 +634,9 @@ void gaussBlurSeparateMirrorGpu
 	// kernel preparation
 	//-----------------------
 	
-	// TODO: test if results stay the same with kept kernels
-	//if( !constant_kernel_bound )
-	//{
+	// compute kernel only once and keep it in constant memory
+	if( !constant_kernel_bound )
+	{
 		if(selfallocmask)
 		{
 			mask = new float[radius + 1];
@@ -684,7 +684,7 @@ void gaussBlurSeparateMirrorGpu
 		gpu_bindKernelToConstantMemory_y ( mask, radius + 1 );
 
 		constant_kernel_bound = true;
-	//}
+	}
 
 	//-----------------------
 	// convolution
@@ -812,7 +812,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
  *
  * mask is supposed to be a CPU pointer!
  */
-void gaussBlurSeparateMirrorGpu_tex_cm
+void gaussBlurSeparateMirrorGpu
 	(
 		float* 	in_g,		// input image
 		float* 	out_g,		// convoluted output image
@@ -877,9 +877,9 @@ void gaussBlurSeparateMirrorGpu_tex_cm
 	// kernel preparation
 	//-----------------------
 	
-	// TODO: test if results stay the same with kept kernels
-	//if( !constant_kernel_bound )
-	//{
+	// compute kernel only once and keep it in constant memory
+	if( !constant_kernel_bound )
+	{
 		if(selfallocmask)
 		{
 			mask = new float[radius + 1];
@@ -927,7 +927,7 @@ void gaussBlurSeparateMirrorGpu_tex_cm
 		gpu_bindKernelToConstantMemory_y ( mask, radius + 1 );
 
 		constant_kernel_bound = true;
-	//}
+	}
 
 	//-----------------------
 	// convolution

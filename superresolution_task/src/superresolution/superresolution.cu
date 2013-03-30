@@ -41,6 +41,7 @@
 
 //shared mem flags
 #define SHARED_MEM 0
+#define GAUSS_TEXTURE_MEM 1
 
 #include <linearoperations/linearoperations.h>
 
@@ -217,7 +218,7 @@ __global__ void dualTVHuber_gm
 }
 
 //TODO write comment
-// shared memory version of dualTVHuber
+// shared memory version of primal1N
 __global__ void dualTVHuber_sm
 (
 		float 	*uor_g,								// Field of overrelaxed primal variables
@@ -380,7 +381,11 @@ void computeSuperresolutionUngerGPU
 				if( blur > 0.0f )
 				{
 					// blur image
+#if GAUSS_TEXTURE_MEM
 					gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#else
+					gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#endif
 				}
 				else
 				{
@@ -449,7 +454,13 @@ void computeSuperresolutionUngerGPU
 			if( blur > 0.0f )
 			{
 				// blur image
+
+#if GAUSS_TEXTURE_MEM
 				gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#else
+				gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+#endif
+
 			}
 			else
 			{

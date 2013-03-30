@@ -157,6 +157,7 @@ void forewardRegistrationBilinearAtomic
  * @param mask Memory for storage of the convolution kernel.
  * If NULL, the method will allocate it itself
  */
+// using texture memory
 void gaussBlurSeparateMirrorGpu
 (
 		float *in_g,
@@ -170,7 +171,7 @@ void gaussBlurSeparateMirrorGpu
 		float *temp_g,
 		float *mask
 );
-
+// using global memory
 void gaussBlurSeparateMirrorGpu_gm
 (
 		float *in_g,
