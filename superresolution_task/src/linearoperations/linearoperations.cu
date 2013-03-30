@@ -759,7 +759,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_x
 		// the kernel is symmetric and therefore only the center and the right half is given
 		
 		// calculate center outside of the loop (otherwise it would be computed twice)		
-		float result = constKernelX[0] * tex2D( tex_linearoperation, (float)x + 0.5f, (float)y + 0.5f );
+		float result = constKernelX[0] * tex2D( tex_linearoperation, x, y );
 		
 		for( int i = 1; i <= radius; ++i )
 		{
@@ -768,8 +768,8 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_x
 
 			// computing offset symmetrically
 			result += constKernelX[i] * (
-					tex2D( tex_linearoperation, (float)(x - i) + 0.5f, (float)y + 0.5f ) + // left part of kernel
-					tex2D( tex_linearoperation, (float)(x + i) + 0.5f, (float)y + 0.5f )   // right part of the kernel
+					tex2D( tex_linearoperation, x - i, y ) + // left part of kernel
+					tex2D( tex_linearoperation, x + i, y )   // right part of the kernel
 				);
 		}
 
@@ -797,7 +797,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
 		// the kernel is symmetric and therefore only the center and the lower half is given
 
 		// calculate center outside of the loop (otherwise it would be computed twice)		
-		float result = constKernelY[0] * tex2D( tex_linearoperation, (float)x + 0.5f, (float)y + 0.5f );
+		float result = constKernelY[0] * tex2D( tex_linearoperation, x, y );
 		
 		// computing offset symmetrically
 		for( int i = 1; i <= radius; ++i )
@@ -806,8 +806,8 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
 			// used address mode: mirror
 
 			result += constKernelY[i] * (
-					tex2D( tex_linearoperation, (float)x + 0.5f, (float)(y - i) + 0.5f ) + // upper part of kernel
-					tex2D( tex_linearoperation, (float)x + 0.5f, (float)(y + i) + 0.5f )   // lower part of kernel
+					tex2D( tex_linearoperation, x, y - i ) + // upper part of kernel
+					tex2D( tex_linearoperation, x, y + i )   // lower part of kernel
 				);
 		}
 
@@ -942,9 +942,8 @@ void gaussBlurSeparateMirrorGpu
 	// convolution
 	//-----------------------
 
-// TODO: change to 0,1 and update kernels
 	// prepare texture
-	setTexturesLinearOperations( 1, 1 ); // filter mode: point (no offset necessary), address mode: mirror
+	setTexturesLinearOperations( 0, 1 ); // filter mode: point (no offset necessary), address mode: mirror
 
 	// invoke gauss kernels on gpu for convolution in x and y direction
 	// MAXKERNELSIZE and MAXKERNELRADIUS do not allow to combine x and y in one kernel
