@@ -439,6 +439,7 @@ __global__ void foreward_warp_kernel_atomic (
 /*
  * Forward warping
  */
+// TODO: try textures
 void forewardRegistrationBilinearAtomic (
 		const float *flow1_g,
 		const float *flow2_g,
@@ -1210,7 +1211,7 @@ __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
 }
 
 // TODO: remove
-// philipp's great debugging kernel, altered to produce a pattern diagonal lines
+// philipp's great debugging kernel, altered to produce a pattern of diagonal lines
 __global__ void debugKernel( float *field_g, int nx, int ny, int pitchf1 )
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;

@@ -319,7 +319,6 @@ void computeSuperresolutionUngerGPU
 				( uor_g, xi1_g, xi2_g, nx, ny, pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
 #endif
 
-
 		// DUAL DATA
 		
 		// iterating over all images
@@ -328,7 +327,7 @@ void computeSuperresolutionUngerGPU
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )		
 		{
 				// call backward warping
-				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1_orig, pitchf1, 1.0f, 1.0f );
+				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
 
 				if( blur > 0.0f )
 				{
@@ -345,9 +344,15 @@ void computeSuperresolutionUngerGPU
 		
 				if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 				{
-					resampleAreaParallelSeparate(temp2_g, temp1_g, nx, ny,
-												pitchf1, nx_orig, ny_orig,
-												pitchf1_orig, temp4_g);
+					resampleAreaParallelSeparate(
+							temp2_g,			// input image
+							temp1_g,			// output image
+							nx, ny,				// input size
+							pitchf1,			// input pitch
+							nx_orig, ny_orig,	// output size
+							pitchf1_orig,		// output pitch
+							temp4_g				// helper array
+						);
 				}
 				else
 				{
@@ -358,13 +363,14 @@ void computeSuperresolutionUngerGPU
 				}
 				
 #if SHARED_MEM
+		// TODO: review parameters
 		dualL1Difference_sm<<<dimGrid,dimBlock>>>
 				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
 #else
-		dualL1Difference_gm<<<dimGrid, dimBlock>>>(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
+		dualL1Difference_gm<<<dimGrid, dimBlock>>>
+				(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
 					          factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
 #endif
-
 
 		}
 		
@@ -412,7 +418,7 @@ void computeSuperresolutionUngerGPU
 					nx, ny,
 					pitchf1
 				);
-			
+
 			// add 1st to 3rd helper array
 			addKernel <<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
 		}
@@ -422,5 +428,6 @@ void computeSuperresolutionUngerGPU
 #else
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 #endif
+
 	}
 }
