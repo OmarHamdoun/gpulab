@@ -292,7 +292,7 @@ void computeSuperresolutionUngerGPU
 	// initialise all elements of q_g to zero
 	for(unsigned int k = 0; k < q_g.size(); k++ )
 	{
-		setKernel <<<dimGrid, dimBlock>>>( q_g[k], nx, ny, pitchf1, 0.0f );
+		setKernel <<<dimGrid, dimBlock>>>( q_g[k], nx_orig, ny_orig, pitchf1_orig, 0.0f );
 	}
 	
 	float factorquad              = factor_rescale_x * factor_rescale_x * factor_rescale_y * factor_rescale_y;
