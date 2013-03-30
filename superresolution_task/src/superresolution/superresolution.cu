@@ -217,7 +217,7 @@ __global__ void dualTVHuber_gm
 }
 
 //TODO write comment
-// shared memory version of primal1N
+// shared memory version of dualTVHuber
 __global__ void dualTVHuber_sm
 (
 		float 	*uor_g,								// Field of overrelaxed primal variables
@@ -234,10 +234,58 @@ __global__ void dualTVHuber_sm
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	
+	int tx = threadIdx.x;
+	int ty = threadIdx.y;
+	
+	__shared__ float xi1[SR_BW][SR_BH];
+	__shared__ float xi2[SR_BW][SR_BH];
+	__shared__ float uor[SR_BW+1][SR_BH+1];
+	
+	int idx = y * pitchf1 + x;
 
+	// load data into shared memory
 	if( x < nx && y < ny ) // guards
 	{
-		//TODO implement me
+		if( tx < SR_BW && ty < SR_BH )
+		{
+			xi1[tx][ty] = xi1_g[idx];
+			xi2[tx][ty] = xi2_g[idx];
+			uor[tx][ty] = uor_g[idx];
+		}
+		
+		if( x == nx -1 )
+		{
+			uor[tx+1][ty] = uor[tx][ty];
+		}
+		else if( threadIdx.x == SR_BW - 1 )
+		{
+			uor[tx+1][ty] = uor_g[idx+1];
+		}
+		
+		if( y == ny -1 )
+		{
+			uor[tx][ty+1] = uor[tx][ty];
+		}
+		else if( threadIdx.y == SR_BH -1 )
+		{
+			uor[tx][ty+1] = uor_g[idx+pitchf1];
+		}
+	}
+	
+	__syncthreads();
+	
+	if(x < nx && y < ny)// guards
+	{
+		// compute
+		float dx = (xi1[tx][ty] + tau_d * factor_update * (uor[tx+1][ty] - uor[tx][ty])) / huber_denom;
+		float dy = (xi2[tx][ty] + tau_d * factor_update * (uor[tx][ty+1] - uor[tx][ty])) / huber_denom;
+		
+		float denom = sqrtf( dx * dx + dy * dy ) / factor_clipping;
+		
+		if(denom < 1.0f) denom = 1.0f;
+		xi1_g[idx] = dx / denom;
+		xi2_g[idx] = dy / denom;
 	}
 }
 
