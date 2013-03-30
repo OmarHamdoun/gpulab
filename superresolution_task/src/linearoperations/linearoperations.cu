@@ -53,6 +53,10 @@ void gpu_bindTextureMemory( float *d_inputImage, int iWidth, int iHeight, size_t
 {
 	cutilSafeCall( cudaBindTexture2D(0, &tex_linearoperation, d_inputImage, &linearoperation_float_tex, iWidth, iHeight, iPitchBytes) );
 }
+void gpu_bindTextureMemory( const float *d_inputImage, int iWidth, int iHeight, size_t iPitchBytes )
+{
+	cutilSafeCall( cudaBindTexture2D(0, &tex_linearoperation, d_inputImage, &linearoperation_float_tex, iWidth, iHeight, iPitchBytes) );
+}
 
 void gpu_unbindTextureMemory()
 {
@@ -308,7 +312,7 @@ void backwardRegistrationBilinearValueTex_gm (
 //================================================================
 
 
-// gpu warping kernel
+// gpu warping kernel with global memory
 __global__ void backwardRegistrationBilinearFunctionGlobalGpu(const float *in_g,
 		const float *flow1_g, const float *flow2_g, float *out_g,
 		const float *constant_g, int nx, int ny, int pitchf1_in,
@@ -368,12 +372,94 @@ void backwardRegistrationBilinearFunctionGlobal(const float *in_g,
 			pitchf1_out, hx, hy);
 }
 
-void backwardRegistrationBilinearFunctionTex(const float *in_g,
-		const float *flow1_g, const float *flow2_g, float *out_g,
-		const float *constant_g, int nx, int ny, int pitchf1_in,
-		int pitchf1_out, float hx, float hy)
+
+
+
+
+
+// gpu warping kernel with texture memory
+__global__ void backwardRegistrationBilinearFunctionTextureGpu
+	(
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		const float *constant_g,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
 {
-	// ### Implement me, if you want ###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	// check if x is within the boundaries
+	if (x < nx && y < ny)
+	{
+		const float xx = (float) x + flow1_g[y * pitchf1_in + x] / hx;
+		const float yy = (float) y + flow2_g[y * pitchf1_in + x] / hy;
+
+		int xxFloor = (int) floor(xx);
+		int yyFloor = (int) floor(yy);
+
+		int xxCeil = (xxFloor == nx - 1) ? (xxFloor) : (xxFloor + 1);
+		int yyCeil = (yyFloor == ny - 1) ? (yyFloor) : (yyFloor + 1);
+
+		float xxRest = xx - (float) xxFloor;
+		float yyRest = yy - (float) yyFloor;
+
+		//same weird expression as in cpp
+		out_g[y * pitchf1_out + x] =
+				(xx < 0.0f || yy < 0.0f || xx > (float) (nx - 1) || yy > (float) (ny - 1))
+				?
+					constant_g[y * pitchf1_in + x]
+				:
+					  (1.0f - xxRest) * (1.0f - yyRest) * tex2D( tex_linearoperation, xxFloor, yyFloor ) // ingen offset 
+					+ xxRest          * (1.0f - yyRest) * tex2D( tex_linearoperation, xxCeil,  yyFloor )
+					+ (1.0f - xxRest) * yyRest          * tex2D( tex_linearoperation, xxFloor, yyCeil )
+					+ xxRest          * yyRest          * tex2D( tex_linearoperation, xxCeil,  yyCeil );
+
+	}
+}
+
+void backwardRegistrationBilinearFunctionTex
+	(
+		const float* in_g,
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		const float* constant_g,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
+{
+	// block and grid size
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( gridsize_x, gridsize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+
+	// TODO: has texture to be bound every time?
+
+	// prepare texture
+	setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+
+	// bind input image to texture
+	gpu_bindTextureMemory( in_g, nx, ny, pitchf1_in * sizeof(float) );
+
+	backwardRegistrationBilinearFunctionTextureGpu<<<dimGrid, dimBlock>>>(
+			flow1_g, flow2_g, out_g, constant_g, nx, ny, pitchf1_in,
+			pitchf1_out, hx, hy );
+
+	// release texture
+	gpu_unbindTextureMemory();
 }
 
 
