@@ -186,10 +186,10 @@ __global__ void primal1N_gm
 }
 
 __global__ void primal1N_sm
-	(
+(
 		const float *xi1,
 		const float *xi2,
-		const float *degraded,
+		const float *degraded,		// temp3_g
 		float *u,
 		float *uor,
 		int nx,
@@ -199,16 +199,66 @@ __global__ void primal1N_sm
 		float factor_degrade_update,
 		float tau_p,
 		float overrelaxation
-    )
+)
 {
 	const int x = threadIdx.x + blockDim.x * blockIdx.x;
 	const int y = threadIdx.y + blockDim.y * blockIdx.y;
+	
+	const int tx = threadIdx.x;
+	const int ty = threadIdx.y;
+	
+	int idx = y * pitch + x;
+	
+	__shared__ float s_xi1[SR_BW+1][SR_BH];
+	__shared__ float s_xi2[SR_BW][SR_BH+1];
 
+	// loading data to shared memory
 	if (x < nx && y < ny)
 	{
 		//TODO implement me
+		if( tx < SR_BW && ty < SR_BH )
+		{
+			s_xi1[tx+1][ty] = xi1[idx];
+			s_xi2[tx][ty+1] = xi2[idx];
+		}
+		
+		if( x == 0 )
+		{
+			s_xi1[0][ty] = 0.0f;
+		}
+		else if( threadIdx.x == 0)
+		{
+			s_xi1[0][ty] = xi1[idx-1];
+		}
+		
+		if( y == 0 )
+		{
+			s_xi2[tx][0] = 0.0f;
+		}
+		else if( threadIdx.y == 0 )
+		{
+			s_xi2[tx][0] = xi2[idx-pitch];
+		}
+	}
+	
+	__syncthreads();
+	
+	if (x < nx && y < ny)
+	{		
+		float u_old = u[idx];
+	
+		// change of indices for xi1 & xi2 due to the way shared memory copying is done !
+		// produces, correct results!
+		float u_new = u_old + tau_p * ( factor_tv_update * 
+								( s_xi1[tx+1][ty] - s_xi1[tx][ty] + s_xi2[tx][ty+1] - s_xi2[tx][ty]) -
+								factor_degrade_update * degraded[idx]);
+		
+		// write back to output image
+		u[idx] = u_new;
+		uor[idx] = overrelaxation * u_new + (1.0f - overrelaxation) * u_old;		
 	}
 }
+
 
 //TODO write comment
 // global memory version of primal1N
@@ -514,6 +564,5 @@ void computeSuperresolutionUngerGPU
 #else
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 #endif
-
 	}
 }
