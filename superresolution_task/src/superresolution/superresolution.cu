@@ -84,7 +84,7 @@ __global__ void dualL1Difference_gm
 }
 
 //TODO write comment
-// shared memory version of primal1N
+// shared memory version of dualL1Difference
 __global__ void dualL1Difference_sm
 	(
 		const float *primal,
@@ -101,10 +101,47 @@ __global__ void dualL1Difference_sm
 {
 	const int x = threadIdx.x + blockDim.x * blockIdx.x;
 	const int y = threadIdx.y + blockDim.y * blockIdx.y;
-
-	if (x < nx && y < ny)
+	
+	const int tx = threadIdx.x;
+	const int ty = threadIdx.y;
+	
+	__shared__ float s_dual		[SR_BW][SR_BH];
+	__shared__ float s_primal	[SR_BW][SR_BH];
+	__shared__ float s_constant	[SR_BW][SR_BH];
+	
+	int idx = y * pitch + x;
+	
+	// loading the data in shared memory
+	if (x < nx && y < ny)//guards
+	{	
+		if( tx < SR_BW && ty < SR_BH )
+		{
+			s_dual		[tx][ty] = dual		[idx];
+			s_primal	[tx][ty] = primal	[idx];
+			s_constant	[tx][ty] = constant	[idx];
+		}
+	}
+	
+	__syncthreads();
+	
+	if( x < nx && y < ny )//guards
 	{
-		//TODO implement
+		// compute
+		s_dual[tx][ty] =(s_dual[tx][ty] + tau_d * factor_update * 
+						( s_primal[tx][ty] - s_constant[tx][ty])) / huber_denom;
+		
+		if( s_dual[tx][ty] < -factor_clipping)
+		{
+			dual[idx] = -factor_clipping;
+		}
+		else if ( s_dual[tx][ty] > factor_clipping)
+		{
+			dual[idx] = factor_clipping;
+		}
+		else
+		{
+			dual[idx] = s_dual[tx][ty];
+		}
 	}
 }
 
@@ -413,7 +450,8 @@ void computeSuperresolutionUngerGPU
 #if SHARED_MEM
 		// TODO: review parameters
 		dualL1Difference_sm<<<dimGrid,dimBlock>>>
-				(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+				( temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig ,
+							  factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
 #else
 		dualL1Difference_gm<<<dimGrid, dimBlock>>>
 				(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
