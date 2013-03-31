@@ -424,6 +424,7 @@ __global__ void backwardRegistrationBilinearFunctionTextureGpu
 	}
 }
 
+// TODO: compare speed with gm version
 void backwardRegistrationBilinearFunctionTex
 	(
 		const float* in_g,
@@ -482,10 +483,10 @@ __global__ void foreward_warp_kernel_atomic (
 	// get thread coordinates and index
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-	const unsigned int idx = y * pitchf1 + x;
 	
 	if( x < nx && y < ny )
 	{
+		const unsigned int idx = y * pitchf1 + x;
 		
 		// calculate target coordinates: coords + flow values
 		const float xx = (float)x + flow1_g[idx];
@@ -510,21 +511,24 @@ __global__ void foreward_warp_kernel_atomic (
 			yyf = yy - yyf;
 		
 			// distribute input pixel value to adjacent pixels of target pixel
-			float out_xy   = in_g[idx] * (1.0f - xxf) * (1.0f - yyf);
-			float out_x1y  = in_g[idx] * xxf * (1.0f - yyf);
-			float out_xy1  = in_g[idx] * (1.0f - xxf) * yyf;
-			float out_x1y1 = in_g[idx] * xxf * yyf;		
-				
+			const in_value = in_g[idx];
+
 			// eject the warp core!
 			// avoid race conditions by use of atomic operations
-			atomicAdd( out_g + (yyi * pitchf1 + xxi),           out_xy );
-			atomicAdd( out_g + (yyi * pitchf1 + xxi + 1),       out_x1y );
-			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi),     out_xy1 );
-			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi + 1), out_x1y1 );
+			atomicAdd( out_g + (yyi * pitchf1 + xxi),           in_value * (1.0f - xxf) * (1.0f - yyf) );
+			atomicAdd( out_g + (yyi * pitchf1 + xxi + 1),       in_value * xxf * (1.0f - yyf) );
+			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi),     in_value * (1.0f - xxf) * yyf );
+			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi + 1), in_value * xxf * yyf );
 
-			// TODO: think about hierarchical atomics
-			// problem: target coordinates can be anywhere on image,
-			// so shared memory per block is limited reasonable	
+			// hierarchical atomics not reasonable:
+			// target coordinates can be anywhere on image,
+			// so memory for whole image has to be allocated per block
+			// but still a lot of atomics would be necessary
+			// to get rid of the atomics, memory for the whole image
+			// had to be stored per thread, which is an absolute overkill,
+			// as each thread writes to only 4 of teh nx*ny values and
+			// each thread has to loop over nx*ny thread memories afterwards
+			// to summarize the values
 		}
 	}
 }
@@ -534,7 +538,6 @@ __global__ void foreward_warp_kernel_atomic (
 /*
  * Forward warping
  */
-// TODO: try textures
 void forewardRegistrationBilinearAtomic (
 		const float *flow1_g,
 		const float *flow2_g,
