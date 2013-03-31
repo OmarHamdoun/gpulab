@@ -45,6 +45,8 @@ timeval startFirstGauss, endFirstGauss;
 
 //shared mem flags
 #define SHARED_MEM 0
+#define GAUSS_TEXTURE_MEM 1
+#define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
 
 #define TIME_DEBUG 1
 #define IMAGE_DEBUG 1
@@ -92,7 +94,7 @@ __global__ void dualL1Difference_gm
 }
 
 //TODO write comment
-// shared memory version of primal1N
+// shared memory version of dualL1Difference
 __global__ void dualL1Difference_sm
 	(
 		const float *primal,
@@ -109,10 +111,47 @@ __global__ void dualL1Difference_sm
 {
 	const int x = threadIdx.x + blockDim.x * blockIdx.x;
 	const int y = threadIdx.y + blockDim.y * blockIdx.y;
-
-	if (x < nx && y < ny)
+	
+	const int tx = threadIdx.x;
+	const int ty = threadIdx.y;
+	
+	__shared__ float s_dual		[SR_BW][SR_BH];
+	__shared__ float s_primal	[SR_BW][SR_BH];
+	__shared__ float s_constant	[SR_BW][SR_BH];
+	
+	int idx = y * pitch + x;
+	
+	// loading the data in shared memory
+	if (x < nx && y < ny)//guards
+	{	
+		if( tx < SR_BW && ty < SR_BH )
+		{
+			s_dual		[tx][ty] = dual		[idx];
+			s_primal	[tx][ty] = primal	[idx];
+			s_constant	[tx][ty] = constant	[idx];
+		}
+	}
+	
+	__syncthreads();
+	
+	if( x < nx && y < ny )//guards
 	{
-		//TODO implement
+		// compute
+		s_dual[tx][ty] =(s_dual[tx][ty] + tau_d * factor_update * 
+						( s_primal[tx][ty] - s_constant[tx][ty])) / huber_denom;
+		
+		if( s_dual[tx][ty] < -factor_clipping)
+		{
+			dual[idx] = -factor_clipping;
+		}
+		else if ( s_dual[tx][ty] > factor_clipping)
+		{
+			dual[idx] = factor_clipping;
+		}
+		else
+		{
+			dual[idx] = s_dual[tx][ty];
+		}
 	}
 }
 
@@ -157,10 +196,10 @@ __global__ void primal1N_gm
 }
 
 __global__ void primal1N_sm
-	(
+(
 		const float *xi1,
 		const float *xi2,
-		const float *degraded,
+		const float *degraded,		// temp3_g
 		float *u,
 		float *uor,
 		int nx,
@@ -170,16 +209,66 @@ __global__ void primal1N_sm
 		float factor_degrade_update,
 		float tau_p,
 		float overrelaxation
-    )
+)
 {
 	const int x = threadIdx.x + blockDim.x * blockIdx.x;
 	const int y = threadIdx.y + blockDim.y * blockIdx.y;
+	
+	const int tx = threadIdx.x;
+	const int ty = threadIdx.y;
+	
+	int idx = y * pitch + x;
+	
+	__shared__ float s_xi1[SR_BW+1][SR_BH];
+	__shared__ float s_xi2[SR_BW][SR_BH+1];
 
+	// loading data to shared memory
 	if (x < nx && y < ny)
 	{
 		//TODO implement me
+		if( tx < SR_BW && ty < SR_BH )
+		{
+			s_xi1[tx+1][ty] = xi1[idx];
+			s_xi2[tx][ty+1] = xi2[idx];
+		}
+		
+		if( x == 0 )
+		{
+			s_xi1[0][ty] = 0.0f;
+		}
+		else if( threadIdx.x == 0)
+		{
+			s_xi1[0][ty] = xi1[idx-1];
+		}
+		
+		if( y == 0 )
+		{
+			s_xi2[tx][0] = 0.0f;
+		}
+		else if( threadIdx.y == 0 )
+		{
+			s_xi2[tx][0] = xi2[idx-pitch];
+		}
+	}
+	
+	__syncthreads();
+	
+	if (x < nx && y < ny)
+	{		
+		float u_old = u[idx];
+	
+		// change of indices for xi1 & xi2 due to the way shared memory copying is done !
+		// produces, correct results!
+		float u_new = u_old + tau_p * ( factor_tv_update * 
+								( s_xi1[tx+1][ty] - s_xi1[tx][ty] + s_xi2[tx][ty+1] - s_xi2[tx][ty]) -
+								factor_degrade_update * degraded[idx]);
+		
+		// write back to output image
+		u[idx] = u_new;
+		uor[idx] = overrelaxation * u_new + (1.0f - overrelaxation) * u_old;		
 	}
 }
+
 
 //TODO write comment
 // global memory version of primal1N
@@ -242,10 +331,58 @@ __global__ void dualTVHuber_sm
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	
+	int tx = threadIdx.x;
+	int ty = threadIdx.y;
+	
+	__shared__ float xi1[SR_BW][SR_BH];
+	__shared__ float xi2[SR_BW][SR_BH];
+	__shared__ float uor[SR_BW+1][SR_BH+1];
+	
+	int idx = y * pitchf1 + x;
 
+	// load data into shared memory
 	if( x < nx && y < ny ) // guards
 	{
-		//TODO implement me
+		if( tx < SR_BW && ty < SR_BH )
+		{
+			xi1[tx][ty] = xi1_g[idx];
+			xi2[tx][ty] = xi2_g[idx];
+			uor[tx][ty] = uor_g[idx];
+		}
+		
+		if( x == nx -1 )
+		{
+			uor[tx+1][ty] = uor[tx][ty];
+		}
+		else if( threadIdx.x == SR_BW - 1 )
+		{
+			uor[tx+1][ty] = uor_g[idx+1];
+		}
+		
+		if( y == ny -1 )
+		{
+			uor[tx][ty+1] = uor[tx][ty];
+		}
+		else if( threadIdx.y == SR_BH -1 )
+		{
+			uor[tx][ty+1] = uor_g[idx+pitchf1];
+		}
+	}
+	
+	__syncthreads();
+	
+	if(x < nx && y < ny)// guards
+	{
+		// compute
+		float dx = (xi1[tx][ty] + tau_d * factor_update * (uor[tx+1][ty] - uor[tx][ty])) / huber_denom;
+		float dy = (xi2[tx][ty] + tau_d * factor_update * (uor[tx][ty+1] - uor[tx][ty])) / huber_denom;
+		
+		float denom = sqrtf( dx * dx + dy * dy ) / factor_clipping;
+		
+		if(denom < 1.0f) denom = 1.0f;
+		xi1_g[idx] = dx / denom;
+		xi2_g[idx] = dy / denom;
 	}
 }
 
@@ -346,11 +483,15 @@ void computeSuperresolutionUngerGPU
 		{
 
 				#if TIME_DEBUG
-			    	clock_gettime(CLOCK_MONOTONIC,  &backTimeTS1);
+			    clock_gettime(CLOCK_MONOTONIC,  &backTimeTS1);
 				#endif
 
 				// call backward warping
+				#if BACKWARDSWARPING_VALUE_TEXTURE_MEM
 				backwardRegistrationBilinearValueTex ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+				#else
+				backwardRegistrationBilinearValueTex_gm ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
+				#endif
 
 				#if TIME_DEBUG
 					clock_gettime(CLOCK_MONOTONIC,  &backTimeTS2);
@@ -372,11 +513,15 @@ void computeSuperresolutionUngerGPU
 				if( blur > 0.0f )
 				{
 					#if TIME_DEBUG
-						clock_gettime(CLOCK_MONOTONIC,  &gauss1TimeTS1);
+					clock_gettime(CLOCK_MONOTONIC,  &gauss1TimeTS1);
 					#endif
 
-					// blur imageS
-					gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+					// blur image
+					#if GAUSS_TEXTURE_MEM
+						gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+					#else
+						gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+					#endif
 
 					#if TIME_DEBUG
 						clock_gettime(CLOCK_MONOTONIC,  &gauss1TimeTS2);
@@ -391,6 +536,8 @@ void computeSuperresolutionUngerGPU
 						saveCudaImage(cudaDebug, temp2_g, nx, ny, pitchf1, 1);
 					}
 					#endif
+
+
 
 				}
 				else
@@ -433,14 +580,15 @@ void computeSuperresolutionUngerGPU
 					temp2_g = temp;
 				}
 
+
 				#if SHARED_MEM
 					// TODO: review parameters
 					dualL1Difference_sm<<<dimGrid,dimBlock>>>
 							(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
 				#else
 					dualL1Difference_gm<<<dimGrid, dimBlock>>>
-							(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
-					          factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
+									(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
+										          factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
 				#endif
 
 				#if IMAGE_DEBUG
@@ -465,17 +613,9 @@ void computeSuperresolutionUngerGPU
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )
 		{
 
-
 			if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 			{
-				/*
-				 *  Assuming it resamples a image from q_g[k] from size nx_orig*ny_orig(pitch- pitchf1_orig) to
-				 *  new size nx*ny (pitch- pitchf1) and stores it in temp1_g with the help of helper array
-				 *  temp4_g. The image in temp1_g is then used for gaussian Blurring
-				 */
-
 				resampleAreaParallelSeparateAdjoined( q_g[k], temp1_g, nx_orig, ny_orig, pitchf1_orig, nx, ny, pitchf1, temp4_g );
-
                 #if IMAGE_DEBUG
 				if(i==10 && k==5)
 				{
@@ -483,10 +623,6 @@ void computeSuperresolutionUngerGPU
 					saveCudaImage(cudaDebug, temp1_g, nx, ny, pitchf1, 1);
 				}
 				#endif
-
-
-
-
 			}
 			else
 			{
@@ -497,7 +633,11 @@ void computeSuperresolutionUngerGPU
 			if( blur > 0.0f )
 			{
 				// blur image
+				#if GAUSS_TEXTURE_MEM
 				gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+				#else
+				gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+				#endif
 
 				#if IMAGE_DEBUG
 				if(i==10 && k==5)
@@ -506,7 +646,6 @@ void computeSuperresolutionUngerGPU
 					saveCudaImage(cudaDebug, temp2_g, nx, ny, pitchf1, 1);
 				}
 				#endif
-
 			}
 			else
 			{
@@ -560,6 +699,7 @@ void computeSuperresolutionUngerGPU
 		#else
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 		#endif
+
 	}
 
 	#if TIME_DEBUG

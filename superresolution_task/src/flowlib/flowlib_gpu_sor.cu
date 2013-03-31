@@ -852,7 +852,7 @@ float FlowLibGpuSOR::computeFlow()
 			#endif
 							
 			// warp original image by resized flow field
-			backwardRegistrationBilinearFunctionGlobal(
+			backwardRegistrationBilinearFunctionTex(
 					_I2pyramid->level[rec_depth], _u1_g, _u2_g, _I2warp,
 					_I1pyramid->level[rec_depth], nx_fine, ny_fine,
 					current_pitch, current_pitch, hx_fine,

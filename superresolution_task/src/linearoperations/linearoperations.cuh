@@ -37,7 +37,28 @@
  * @param hx Pixel width, by which the horizontal displacement is divided
  * @param hy Pixel height, by which the vertical displacement is divided
  */
+/*
+ * Texture memory version
+ */
 void backwardRegistrationBilinearValueTex
+(
+		float *in_g,
+		const float *flow1_g,
+		const float *flow2_g,
+		float *out_g,
+		float value,
+		int   nx,
+		int   ny,
+		int   pitchf1_in,
+		int   pitchf1_out,
+		float hx = 1.0f,
+		float hy = 1.0f
+);
+
+/*
+ * Global memory version
+ */
+void backwardRegistrationBilinearValueTex_gm
 (
 		const float *in_g,
 		const float *flow1_g,
@@ -157,6 +178,7 @@ void forewardRegistrationBilinearAtomic
  * @param mask Memory for storage of the convolution kernel.
  * If NULL, the method will allocate it itself
  */
+// using texture memory
 void gaussBlurSeparateMirrorGpu
 (
 		float *in_g,
@@ -170,7 +192,7 @@ void gaussBlurSeparateMirrorGpu
 		float *temp_g,
 		float *mask
 );
-
+// using global memory
 void gaussBlurSeparateMirrorGpu_gm
 (
 		float *in_g,

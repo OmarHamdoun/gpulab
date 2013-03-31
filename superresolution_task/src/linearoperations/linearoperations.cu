@@ -1,5 +1,5 @@
 /****************************************************************************\
-*      --- Practical Course: GPU Programming in Computer Vision ---
+ *      --- Practical Course: GPU Programming in Computer Vision ---
  *
  * time:    winter term 2012/13 / March 11-18, 2013
  *
@@ -20,8 +20,6 @@
 #include <auxiliary/cuda_basic.cuh>
 #include <iostream>
 #include <linearoperations/linearoperations.cuh>
-
-#define SHARED_MEM 0
 
 // TEXTURES
 
@@ -52,6 +50,10 @@ void gpu_bindKernelToConstantMemory_y ( const float* kernel_y, const int size )
 // TEXTURE METHODS
 
 void gpu_bindTextureMemory( float *d_inputImage, int iWidth, int iHeight, size_t iPitchBytes )
+{
+	cutilSafeCall( cudaBindTexture2D(0, &tex_linearoperation, d_inputImage, &linearoperation_float_tex, iWidth, iHeight, iPitchBytes) );
+}
+void gpu_bindTextureMemory( const float *d_inputImage, int iWidth, int iHeight, size_t iPitchBytes )
 {
 	cutilSafeCall( cudaBindTexture2D(0, &tex_linearoperation, d_inputImage, &linearoperation_float_tex, iWidth, iHeight, iPitchBytes) );
 }
@@ -115,16 +117,14 @@ __device__ float atomicAdd(float* address, double val)
 #endif
 
 //================================================================
-// backward warping
+// backward warping value
 //================================================================
 
-// TODO: change global memory to texture
 /*
  * Texture is faster than global memory, as memory access may be random
  * Access locations depending on flow direction
  */
 __global__ void backwardRegistrationBilinearValueTexKernel (
-		const float* in_g,
 		const float* flow1_g,
 		const float* flow2_g,
 		float* out_g,
@@ -146,21 +146,21 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 		float hx_1 = 1.0f / hx;
 		float hy_1 = 1.0f / hy;
 	
+		// get target area, where flow points at
 		float ii_fp = x + (flow1_g[y * pitchf1_in + x] * hx_1);
 		float jj_fp = y + (flow2_g[y * pitchf1_in + x] * hy_1);
 	
-		if( (ii_fp < 0.0f) || (jj_fp < 0.0f)
+		// set result to a given value, if the flow points outside the image or is not a number
+		if( (ii_fp < 0.0f) || (jj_fp < 0.0f || !isfinite( ii_fp ) || !isfinite( jj_fp ) )
 					 || (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1)) )
 		{
 			out_g[y * pitchf1_out + x] = value;
 		}
-		else if( !isfinite( ii_fp ) || !isfinite( jj_fp ) )
-		{
-			//fprintf(stderr,"!");
-			out_g[ y * pitchf1_out + x] = value;
-		}
 		else
 		{
+			// get output value by taking the 4 pixel surround the taget point into account
+
+			// left and upper pixel coordinates
 			int xx = (int)ii_fp;
 			int yy = (int)jj_fp;
 	
@@ -171,14 +171,57 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 			float yy_rest = jj_fp - (float)yy;
 	
 			out_g[y * pitchf1_out + x] =
-					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy  * pitchf1_in + xx]
-					+ xx_rest * (1.0f - yy_rest)        * in_g[yy  * pitchf1_in + xx1]
-					+ (1.0f - xx_rest) * yy_rest        * in_g[yy1 * pitchf1_in + xx]
-					+ xx_rest * yy_rest                 * in_g[yy1 * pitchf1_in + xx1];
+					(1.0f - xx_rest) * (1.0f - yy_rest) * tex2D( tex_linearoperation, xx, yy )
+					+ xx_rest * (1.0f - yy_rest)        * tex2D( tex_linearoperation, xx1, yy )
+					+ (1.0f - xx_rest) * yy_rest        * tex2D( tex_linearoperation, xx, yy1 )
+					+ xx_rest * yy_rest                 * tex2D( tex_linearoperation, xx1, yy1 );
 		}
 	}
 }
 
+/*
+ * Texture memory version
+ */
+void backwardRegistrationBilinearValueTex (
+		float* in_g,			// _u_overrelaxed
+		const float* flow1_g,	// flow->u1
+		const float* flow2_g,	// flow->u2
+		float* out_g,			// _help1
+		float value,			// 0.0f
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,				// 1.0f
+		float hy				// 1.0f
+	)
+{
+	// block and grid size
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( gridsize_x, gridsize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+	
+	// TODO: has texture to be bound every time?
+
+	// prepare texture
+	setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+
+	// bind input image to texture
+	gpu_bindTextureMemory( in_g, nx, ny, pitchf1_in * sizeof(float) );
+
+	backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>
+		( flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
+
+	// release texture
+	gpu_unbindTextureMemory();
+
+}
+
+
+
+// using global memory
 __global__ void backwardRegistrationBilinearValueTexKernel_gm
 	(
 		const float* in_g,
@@ -233,8 +276,10 @@ __global__ void backwardRegistrationBilinearValueTexKernel_gm
 	}
 }
 
-
-void backwardRegistrationBilinearValueTex (
+/*
+ * Global memory version for speed comparison
+ */
+void backwardRegistrationBilinearValueTex_gm (
 		const float* in_g,		// _u_overrelaxed
 		const float* flow1_g,	// flow->u1
 		const float* flow2_g,	// flow->u2
@@ -255,51 +300,19 @@ void backwardRegistrationBilinearValueTex (
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
-
-
-#if SHARED_MEM
-		// TODO: binding of texture
-
-		backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>(
-				in_g,
-				flow1_g,
-				flow2_g,
-				out_g,
-				value,
-				nx,
-				ny,
-				pitchf1_in,
-				pitchf1_out,
-				hx,
-				hy
-			);
-
-		// TODO: release texture
-#else
-		backwardRegistrationBilinearValueTexKernel_gm<<<dimGrid, dimBlock>>>(
-				in_g,
-				flow1_g,
-				flow2_g,
-				out_g,
-				value,
-				nx,
-				ny,
-				pitchf1_in,
-				pitchf1_out,
-				hx,
-				hy
-			);
-#endif
-
+	backwardRegistrationBilinearValueTexKernel_gm<<<dimGrid, dimBlock>>>
+			( in_g, flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
 }
 
 
 
 
+//================================================================
+// backward warping
+//================================================================
 
 
-
-// gpu warping kernel
+// gpu warping kernel with global memory
 __global__ void backwardRegistrationBilinearFunctionGlobalGpu(const float *in_g,
 		const float *flow1_g, const float *flow2_g, float *out_g,
 		const float *constant_g, int nx, int ny, int pitchf1_in,
@@ -359,12 +372,94 @@ void backwardRegistrationBilinearFunctionGlobal(const float *in_g,
 			pitchf1_out, hx, hy);
 }
 
-void backwardRegistrationBilinearFunctionTex(const float *in_g,
-		const float *flow1_g, const float *flow2_g, float *out_g,
-		const float *constant_g, int nx, int ny, int pitchf1_in,
-		int pitchf1_out, float hx, float hy)
+
+
+
+
+
+// gpu warping kernel with texture memory
+__global__ void backwardRegistrationBilinearFunctionTextureGpu
+	(
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		const float *constant_g,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
 {
-	// ### Implement me, if you want ###
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	// check if x is within the boundaries
+	if (x < nx && y < ny)
+	{
+		const float xx = (float) x + flow1_g[y * pitchf1_in + x] / hx;
+		const float yy = (float) y + flow2_g[y * pitchf1_in + x] / hy;
+
+		int xxFloor = (int) floor(xx);
+		int yyFloor = (int) floor(yy);
+
+		int xxCeil = (xxFloor == nx - 1) ? (xxFloor) : (xxFloor + 1);
+		int yyCeil = (yyFloor == ny - 1) ? (yyFloor) : (yyFloor + 1);
+
+		float xxRest = xx - (float) xxFloor;
+		float yyRest = yy - (float) yyFloor;
+
+		//same weird expression as in cpp
+		out_g[y * pitchf1_out + x] =
+				(xx < 0.0f || yy < 0.0f || xx > (float) (nx - 1) || yy > (float) (ny - 1))
+				?
+					constant_g[y * pitchf1_in + x]
+				:
+					  (1.0f - xxRest) * (1.0f - yyRest) * tex2D( tex_linearoperation, xxFloor, yyFloor ) // ingen offset 
+					+ xxRest          * (1.0f - yyRest) * tex2D( tex_linearoperation, xxCeil,  yyFloor )
+					+ (1.0f - xxRest) * yyRest          * tex2D( tex_linearoperation, xxFloor, yyCeil )
+					+ xxRest          * yyRest          * tex2D( tex_linearoperation, xxCeil,  yyCeil );
+
+	}
+}
+
+void backwardRegistrationBilinearFunctionTex
+	(
+		const float* in_g,
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		const float* constant_g,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
+{
+	// block and grid size
+	int gridsize_x = ((nx - 1) / LO_BW) + 1;
+	int gridsize_y = ((ny - 1) / LO_BH) + 1;
+
+	dim3 dimGrid( gridsize_x, gridsize_y );
+	dim3 dimBlock( LO_BW, LO_BH );
+
+	// TODO: has texture to be bound every time?
+
+	// prepare texture
+	setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+
+	// bind input image to texture
+	gpu_bindTextureMemory( in_g, nx, ny, pitchf1_in * sizeof(float) );
+
+	backwardRegistrationBilinearFunctionTextureGpu<<<dimGrid, dimBlock>>>(
+			flow1_g, flow2_g, out_g, constant_g, nx, ny, pitchf1_in,
+			pitchf1_out, hx, hy );
+
+	// release texture
+	gpu_unbindTextureMemory();
 }
 
 
@@ -569,7 +664,7 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_y
  *
  * mask is supposed to be a CPU pointer!
  */
-void gaussBlurSeparateMirrorGpu
+void gaussBlurSeparateMirrorGpu_gm
 	(
 		float* 	in_g,		// input image
 		float* 	out_g,		// convoluted output image
@@ -634,9 +729,9 @@ void gaussBlurSeparateMirrorGpu
 	// kernel preparation
 	//-----------------------
 	
-	// TODO: test if results stay the same with kept kernels
-	//if( !constant_kernel_bound )
-	//{
+	// compute kernel only once and keep it in constant memory
+	if( !constant_kernel_bound )
+	{
 		if(selfallocmask)
 		{
 			mask = new float[radius + 1];
@@ -684,7 +779,7 @@ void gaussBlurSeparateMirrorGpu
 		gpu_bindKernelToConstantMemory_y ( mask, radius + 1 );
 
 		constant_kernel_bound = true;
-	//}
+	}
 
 	//-----------------------
 	// convolution
@@ -750,7 +845,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_x
 		// the kernel is symmetric and therefore only the center and the right half is given
 		
 		// calculate center outside of the loop (otherwise it would be computed twice)		
-		float result = constKernelX[0] * tex2D( tex_linearoperation, (float)x + 0.5f, (float)y + 0.5f );
+		float result = constKernelX[0] * tex2D( tex_linearoperation, x, y );
 		
 		for( int i = 1; i <= radius; ++i )
 		{
@@ -759,8 +854,8 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_x
 
 			// computing offset symmetrically
 			result += constKernelX[i] * (
-					tex2D( tex_linearoperation, (float)(x - i) + 0.5f, (float)y + 0.5f ) + // left part of kernel
-					tex2D( tex_linearoperation, (float)(x + i) + 0.5f, (float)y + 0.5f )   // right part of the kernel
+					tex2D( tex_linearoperation, x - i, y ) + // left part of kernel
+					tex2D( tex_linearoperation, x + i, y )   // right part of the kernel
 				);
 		}
 
@@ -788,7 +883,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
 		// the kernel is symmetric and therefore only the center and the lower half is given
 
 		// calculate center outside of the loop (otherwise it would be computed twice)		
-		float result = constKernelY[0] * tex2D( tex_linearoperation, (float)x + 0.5f, (float)y + 0.5f );
+		float result = constKernelY[0] * tex2D( tex_linearoperation, x, y );
 		
 		// computing offset symmetrically
 		for( int i = 1; i <= radius; ++i )
@@ -797,8 +892,8 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
 			// used address mode: mirror
 
 			result += constKernelY[i] * (
-					tex2D( tex_linearoperation, (float)x + 0.5f, (float)(y - i) + 0.5f ) + // upper part of kernel
-					tex2D( tex_linearoperation, (float)x + 0.5f, (float)(y + i) + 0.5f )   // lower part of kernel
+					tex2D( tex_linearoperation, x, y - i ) + // upper part of kernel
+					tex2D( tex_linearoperation, x, y + i )   // lower part of kernel
 				);
 		}
 
@@ -812,7 +907,7 @@ __global__ void gaussBlurSeparateMirrorGPU_tex_cm_y
  *
  * mask is supposed to be a CPU pointer!
  */
-void gaussBlurSeparateMirrorGpu_tex_cm
+void gaussBlurSeparateMirrorGpu
 	(
 		float* 	in_g,		// input image
 		float* 	out_g,		// convoluted output image
@@ -877,9 +972,9 @@ void gaussBlurSeparateMirrorGpu_tex_cm
 	// kernel preparation
 	//-----------------------
 	
-	// TODO: test if results stay the same with kept kernels
-	//if( !constant_kernel_bound )
-	//{
+	// compute kernel only once and keep it in constant memory
+	if( !constant_kernel_bound )
+	{
 		if(selfallocmask)
 		{
 			mask = new float[radius + 1];
@@ -927,14 +1022,14 @@ void gaussBlurSeparateMirrorGpu_tex_cm
 		gpu_bindKernelToConstantMemory_y ( mask, radius + 1 );
 
 		constant_kernel_bound = true;
-	//}
+	}
 
 	//-----------------------
 	// convolution
 	//-----------------------
 
 	// prepare texture
-	setTexturesLinearOperations( 1, 1 ); // filter mode: point (no offset necessary), address mode: mirror
+	setTexturesLinearOperations( 0, 1 ); // filter mode: point (no offset necessary), address mode: mirror
 
 	// invoke gauss kernels on gpu for convolution in x and y direction
 	// MAXKERNELSIZE and MAXKERNELRADIUS do not allow to combine x and y in one kernel
