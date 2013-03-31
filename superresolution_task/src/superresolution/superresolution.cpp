@@ -419,7 +419,6 @@ void SuperResolutionUngerGPU::compute()
     cuda_malloc2D((void**)&(_q.back()),_nx_orig,_ny_orig,1,sizeof(float),&_pitchf1_orig);
   }
 
-
   computeSuperresolutionUngerGPU(_xi1,_xi2,_help1,_help2,_help3,_help4,_u_overrelaxed,_result_g,_q,images_g,_flowsGPU,
       _nx,_ny,_pitchf1,_nx_orig,_ny_orig,_pitchf1_orig,_iterations,_tau_p,_tau_d,_factor_tv,_huber_epsilon,_factor_rescale_x,_factor_rescale_y,_blur,_overrelaxation,_debug);
 
