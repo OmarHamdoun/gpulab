@@ -44,12 +44,12 @@ timeval startFirstGauss, endFirstGauss;
 #endif
 
 //shared mem flags
-#define SHARED_MEM 0
+#define SHARED_MEM 1
 #define GAUSS_TEXTURE_MEM 1
 #define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
 
-#define TIME_DEBUG 1
-#define IMAGE_DEBUG 1
+#define TIME_DEBUG 0
+#define IMAGE_DEBUG 0
 char*  cudaDebug = "";
 
 #include <linearoperations/linearoperations.h>
@@ -156,7 +156,7 @@ __global__ void dualL1Difference_sm
 }
 
 //TODO write comment
-// global memory version of primal1N
+//global memory version of primal1N
 __global__ void primal1N_gm
 	(
 		const float *xi1,
@@ -528,7 +528,6 @@ void computeSuperresolutionUngerGPU
 						gauss1Time = (gauss1TimeTS2.tv_sec - gauss1TimeTS1.tv_sec) + (double) (gauss1TimeTS2.tv_nsec - gauss1TimeTS1.tv_nsec) * 1e-9;
 					#endif
 
-
 					#if IMAGE_DEBUG
 					if(i==10 && k==5)
 					{
@@ -536,9 +535,6 @@ void computeSuperresolutionUngerGPU
 						saveCudaImage(cudaDebug, temp2_g, nx, ny, pitchf1, 1);
 					}
 					#endif
-
-
-
 				}
 				else
 				{
@@ -550,8 +546,7 @@ void computeSuperresolutionUngerGPU
 
 				if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 				{
-
-
+					
 				 #if TIME_DEBUG
 					clock_gettime(CLOCK_MONOTONIC,  &resampleTimeTS1);
 				 #endif
@@ -584,7 +579,8 @@ void computeSuperresolutionUngerGPU
 				#if SHARED_MEM
 					// TODO: review parameters
 					dualL1Difference_sm<<<dimGrid,dimBlock>>>
-							(uor_g,xi1_g,xi2_g,nx,ny,pitchf1,factor_tv_update,factor_tv_clipping,huber_denom_tv,tau_d);
+								( temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig ,
+								  factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
 				#else
 					dualL1Difference_gm<<<dimGrid, dimBlock>>>
 									(temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
@@ -612,7 +608,6 @@ void computeSuperresolutionUngerGPU
 		flow   = flowsGPU.begin();
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )
 		{
-
 			if( factor_rescale_x > 1.0f || factor_rescale_y > 1.0f )
 			{
 				resampleAreaParallelSeparateAdjoined( q_g[k], temp1_g, nx_orig, ny_orig, pitchf1_orig, nx, ny, pitchf1, temp4_g );
@@ -712,11 +707,6 @@ void computeSuperresolutionUngerGPU
     fprintf(stderr,"\n Time for forward %f", forwardTime);
     fprintf(stderr,"\n Time for gauss 1 %f",gauss1Time);
     fprintf(stderr,"\n Time for resample 1 %f",resample1Time);
-
-
-
-
-
-
+    
 	#endif
 }
