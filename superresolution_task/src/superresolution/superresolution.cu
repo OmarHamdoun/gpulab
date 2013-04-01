@@ -79,16 +79,20 @@ __global__ void dualL1Difference_gm
 	if (x < nx && y < ny)
 	{
 		int idx = x + pitch * y;
-		dual[idx] = (dual[idx] + tau_d * factor_update * (primal[idx] - constant[idx])) / huber_denom;
-
-		if (dual[idx] < -factor_clipping)
+		
+		float dualTemp = (dual[idx] + tau_d * factor_update * (primal[idx] - constant[idx])) / huber_denom;
+		
+		if( dualTemp < -factor_clipping)
 		{
 			dual[idx] = -factor_clipping;
 		}
-
-		if (dual[idx] > factor_clipping)
+		else if( dualTemp > factor_clipping)
 		{
 			dual[idx] = factor_clipping;
+		}
+		else
+		{
+			dual[idx] = dualTemp;
 		}
 	}
 }
@@ -115,21 +119,16 @@ __global__ void dualL1Difference_sm
 	const int tx = threadIdx.x;
 	const int ty = threadIdx.y;
 	
-	__shared__ float s_dual		[SR_BW][SR_BH];
-	__shared__ float s_primal	[SR_BW][SR_BH];
-	__shared__ float s_constant	[SR_BW][SR_BH];
+	__shared__ float s_dual[SR_BW][SR_BH];
 	
 	int idx = y * pitch + x;
 	
 	// loading the data in shared memory
+	// NOTE: not using shared memory for primal & constant reduces the execution time 
+	// from 127 micro sec to 108 micro sec
 	if (x < nx && y < ny)//guards
-	{	
-		if( tx < SR_BW && ty < SR_BH )
-		{
-			s_dual		[tx][ty] = dual		[idx];
-			s_primal	[tx][ty] = primal	[idx];
-			s_constant	[tx][ty] = constant	[idx];
-		}
+	{
+		s_dual[tx][ty] = dual[idx];
 	}
 	
 	__syncthreads();
@@ -137,8 +136,8 @@ __global__ void dualL1Difference_sm
 	if( x < nx && y < ny )//guards
 	{
 		// compute
-		s_dual[tx][ty] =(s_dual[tx][ty] + tau_d * factor_update * 
-						( s_primal[tx][ty] - s_constant[tx][ty])) / huber_denom;
+		s_dual[tx][ty] =( s_dual[tx][ty] + tau_d * factor_update * 
+						( primal[idx] - constant[idx])) / huber_denom;		
 		
 		if( s_dual[tx][ty] < -factor_clipping)
 		{
@@ -182,7 +181,7 @@ __global__ void primal1N_gm
 
 		float u_old = u[idx];
 
-		float u_new = u[idx] + tau_p *
+		float u_new = u_old + tau_p * 
 			(
 				factor_tv_update *
 				(xi1[idx] - ( x == 0 ? 0.0f : xi1[idx - 1] ) + xi2[idx] - ( y == 0 ? 0.0f : xi2[idx - pitch] )) -
@@ -225,27 +224,19 @@ __global__ void primal1N_sm
 	// loading data to shared memory
 	if (x < nx && y < ny)
 	{
-		//TODO implement me
-		if( tx < SR_BW && ty < SR_BH )
-		{
-			s_xi1[tx+1][ty] = xi1[idx];
-			s_xi2[tx][ty+1] = xi2[idx];
-		}
+		s_xi1[tx+1][ty] = xi1[idx];
+		s_xi2[tx][ty+1] = xi2[idx];
+				
+		s_xi1[0][ty] = 0.0f; // removing the loop for x==0 brings slight performance improvement
 		
-		if( x == 0 )
-		{
-			s_xi1[0][ty] = 0.0f;
-		}
-		else if( threadIdx.x == 0)
+		if( threadIdx.x == 0)
 		{
 			s_xi1[0][ty] = xi1[idx-1];
 		}
 		
-		if( y == 0 )
-		{
-			s_xi2[tx][0] = 0.0f;
-		}
-		else if( threadIdx.y == 0 )
+		s_xi2[tx][0] = 0.0f; // removing the loop for y==0 brings slight performance improvement
+		
+		if( threadIdx.y == 0 )
 		{
 			s_xi2[tx][0] = xi2[idx-pitch];
 		}
@@ -335,22 +326,17 @@ __global__ void dualTVHuber_sm
 	int tx = threadIdx.x;
 	int ty = threadIdx.y;
 	
-	__shared__ float xi1[SR_BW][SR_BH];
-	__shared__ float xi2[SR_BW][SR_BH];
 	__shared__ float uor[SR_BW+1][SR_BH+1];
 	
 	int idx = y * pitchf1 + x;
 
 	// load data into shared memory
+	// NOTE: not using shared memory for xi1 & xi2 reduces execution time from
+	// 420 to 403 micro sec
 	if( x < nx && y < ny ) // guards
 	{
-		if( tx < SR_BW && ty < SR_BH )
-		{
-			xi1[tx][ty] = xi1_g[idx];
-			xi2[tx][ty] = xi2_g[idx];
-			uor[tx][ty] = uor_g[idx];
-		}
-		
+		uor[tx][ty] = uor_g[idx];
+				
 		if( x == nx -1 )
 		{
 			uor[tx+1][ty] = uor[tx][ty];
@@ -375,8 +361,8 @@ __global__ void dualTVHuber_sm
 	if(x < nx && y < ny)// guards
 	{
 		// compute
-		float dx = (xi1[tx][ty] + tau_d * factor_update * (uor[tx+1][ty] - uor[tx][ty])) / huber_denom;
-		float dy = (xi2[tx][ty] + tau_d * factor_update * (uor[tx][ty+1] - uor[tx][ty])) / huber_denom;
+		float dx = (xi1_g[idx] + tau_d * factor_update * (uor[tx+1][ty] - uor[tx][ty])) / huber_denom;
+		float dy = (xi2_g[idx] + tau_d * factor_update * (uor[tx][ty+1] - uor[tx][ty])) / huber_denom;
 		
 		float denom = sqrtf( dx * dx + dy * dy ) / factor_clipping;
 		
