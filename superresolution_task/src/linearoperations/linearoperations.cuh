@@ -175,7 +175,7 @@ void forewardRegistrationBilinearAtomic
  * @param radius Discrete kernel radius
  * @param temp_g Temporary helper memory. If NULL, the method will
  * allocate it itself
- * @param mask Memory for storage of the convolution kernel.
+ * @param mask CPU memory for storage of the convolution kernel. CPU pointer!
  * If NULL, the method will allocate it itself
  */
 // using texture memory
@@ -190,7 +190,7 @@ void gaussBlurSeparateMirrorGpu
 		float sigmay,
 		int   radius,
 		float *temp_g,
-		float *mask
+		float *mask		// CPU pointer!
 );
 // using global memory
 void gaussBlurSeparateMirrorGpu_gm
@@ -204,7 +204,21 @@ void gaussBlurSeparateMirrorGpu_gm
 		float sigmay,
 		int   radius,
 		float *temp_g,
-		float *mask
+		float *mask		// CPU pointer!
+);
+// using shared memory
+void gaussBlurSeparateMirrorGpu_sm
+(
+		float* in_g,
+		float* out_g,
+		int nx,
+		int ny,
+		int pitchf1,
+		float sigmax,
+		float sigmay,
+		int radius,
+		float* temp_g,
+		float* mask 	// CPU pointer!
 );
 
 /*!

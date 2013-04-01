@@ -45,8 +45,8 @@ timeval startFirstGauss, endFirstGauss;
 
 //shared mem flags
 #define SHARED_MEM 1
-#define GAUSS_TEXTURE_MEM 1
 #define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
+#define GAUSS_MEMORY 1 // 0 = global memory, 1 = shared memory, 2 = texture memory
 
 #define TIME_DEBUG 0
 #define IMAGE_DEBUG 0
@@ -441,7 +441,7 @@ void computeSuperresolutionUngerGPU
 	setKernel <<<dimGrid, dimBlock>>>( uor_g, nx, ny, pitchf1, 64.0f );
 
 	// initialise all elements of q_g to zero
-	for(unsigned int k = 0; k < q_g.size(); k++ )
+	for(unsigned int k = 0; k < q_g.size(); ++k )
 	{
 		setKernel <<<dimGrid, dimBlock>>>( q_g[k], nx_orig, ny_orig, pitchf1_orig, 0.0f );
 	}
@@ -517,9 +517,14 @@ void computeSuperresolutionUngerGPU
 					#endif
 
 					// blur image
-					#if GAUSS_TEXTURE_MEM
+					#if GAUSS_MEMORY == 2
+						// gauss with texture memory
 						gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
+					#elif GAUSS_MEMORY == 1
+						// gauss with shared memory
+						gaussBlurSeparateMirrorGpu_sm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
 					#else
+						// gauss with global memory
 						gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
 					#endif
 

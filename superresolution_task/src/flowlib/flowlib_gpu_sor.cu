@@ -702,7 +702,7 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 	dim3 dimBlock(SF_BW, SF_BH);
 	bool red = 0;
 
-	for (int i = 0; i < outer_iterations; i++)
+	for (int i = 0; i < outer_iterations; ++i)
 	{
 
 		//robustifications
@@ -710,17 +710,13 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 				u_g, v_g, du_g, dv_g, penaltyd_g, penaltyr_g, nx, ny, hx, hy,
 				data_epsilon, diff_epsilon, pitchf1);
 		
-		//catchkernel;
-
 		//righthand side
 		sorflow_update_righthandside_shared<<<dimGrid, dimBlock>>>(u_g, v_g,
 				penaltyd_g, penaltyr_g, bu_g, bv_g, nx, ny, hx, hy, lambda,
 				pitchf1);
 		
-		//catchkernel;
-
 		//sor interation
-		for (int j = 0; j < inner_iterations; j++)
+		for (int j = 0; j < inner_iterations; ++j)
 		{
 			red = 0;
 			sorflow_nonlinear_warp_sor_shared<<<dimGrid, dimBlock>>>(i*j,bu_g, bv_g,
@@ -792,7 +788,7 @@ float FlowLibGpuSOR::computeFlow()
 	//////////////////////////////////////////////////////////////
 	// loop through image pyramide - main algorithm starts here //
 	//////////////////////////////////////////////////////////////
-	for (rec_depth = max_rec_depth; rec_depth >= 0; rec_depth--)
+	for( rec_depth = max_rec_depth; rec_depth >= 0; --rec_depth )
 	{
 		#if VERBOSE
 			fprintf( stderr, "\n\nStart iteration %d", rec_depth );
@@ -818,7 +814,7 @@ float FlowLibGpuSOR::computeFlow()
 		dim3 dimBlock( SF_BW, SF_BH );
 
 		// upsample flowfield to current level
-		if (rec_depth < max_rec_depth)
+		if( rec_depth < max_rec_depth )
 		{
 			#if VERBOSE
 				fprintf(stderr, "\nResampling flow field...");
@@ -845,7 +841,7 @@ float FlowLibGpuSOR::computeFlow()
 			fprintf( stderr, "\nrec_depth=%i, _end_level=%i", rec_depth, _end_level );
 		#endif
 
-		if (rec_depth >= _end_level)
+		if( rec_depth >= _end_level )
 		{
 			#if VERBOSE
 				fprintf(stderr, "\nWarping Image 2...");
