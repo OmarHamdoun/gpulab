@@ -24,3 +24,31 @@ atcremers 25		--			offline
 
 texture error: ( Framework not supported gives this error )
 error at flowlib_gpu_sor.cu(77): cutiSafeCall() Runtime API error : invalid texture reference
+
+
+##################  No of Cores ##############################
+
+MACHINE NAME		CUDA CAPABILITY		# of cores
+
+atradig 114		2.1			1 SM * 48 CORES = 48 
+atradig 102		2.1			1 SM * 48 CORES = 48 
+atradig 109		1.3			30 SM * 8 CORES = 240
+atcremers 14		1.2			12 * 8 = 96
+atcremers 33		2.1			1 * 48 = 48
+
+atradig 146		1.0			Framework not supported
+atcremers 26		1.0			Framework not supported
+atradig 115		1.0			Framework not supported
+atcremers 4		1.0			Framework not supported
+atcremers 3		1.0			Framework not supported
+
+atcremers 5		1.3			30 * 8 = 240
+atradig 140		1.1			16 * 8 = 128
+atradig 112		1.1			1 * 8 = 8
+
+atcremers 25		--			offline	
+
+atcremers32					NO DEVICEQUERY FOUND
+atcremers8					offline
+atcremers11					offline
+atcremers34					offline
