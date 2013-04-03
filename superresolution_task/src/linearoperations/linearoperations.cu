@@ -167,8 +167,8 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 			int xx1 = xx == nx - 1 ? xx : xx + 1;
 			int yy1 = yy == ny - 1 ? yy : yy + 1;
 	
-			float xx_rest = ii_fp - (float)xx;
-			float yy_rest = jj_fp - (float)yy;
+			float xx_rest = ii_fp - (float)xx; // TODO: ii_fp - (float)max( xx+1, nx-1 ); // TODO: remove two lines above!
+			float yy_rest = jj_fp - (float)yy; // TODO: jj_fp - (float)max( yy+1, ny-1 );
 	
 			out_g[y * pitchf1_out + x] =
 					(1.0f - xx_rest) * (1.0f - yy_rest) * tex2D( tex_linearoperation, xx, yy )
@@ -1366,7 +1366,7 @@ __global__ void resampleAreaParallelSeparate_x
 	if( ix < nx && iy < ny)
 	{
 		// initialising out
-		out_g[ index ] = 0.0f;
+		float value = 0.0f;
 		
 		float px = (float)ix * hx;
 		
@@ -1381,21 +1381,24 @@ __global__ void resampleAreaParallelSeparate_x
 		if( left > 0.0f )
 		{
 			// using pitchf1_in instead of nx_orig in original code
-			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * left * factor; // look out for conversion of coordinates
+			value += in_g[ iy * pitchf1_in + (int)floor(px) ] * left * factor; // look out for conversion of coordinates
 			px += 1.0f;
 		}
 		while( midx > 0.0f )
 		{
 			// using pitchf1_in instead of nx_orig in original code
-			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * factor;
+			value += in_g[ iy * pitchf1_in + (int)floor(px) ] * factor;
 			px += 1.0f;
 			midx -= 1.0f;
 		}
 		if( right > RESAMPLE_EPSILON )
 		{
 			// using pitchf1_in instead of nx_orig in original code
-			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * right * factor;
+			value += in_g[ iy * pitchf1_in + (int)floor(px) ] * right * factor;
 		}
+		
+		// write back
+		out_g[ index ] = value;
 	}
 }
 
@@ -1420,7 +1423,7 @@ __global__ void resampleAreaParallelSeparate_y
 	
 	if( ix < nx && iy < ny ) // guards
 	{
-		out_g[index] = 0.0f;
+		float value = 0.0f;
 		
 		float py = (float)iy * hy;
 		float top = ceil(py) - py;
@@ -1436,19 +1439,22 @@ __global__ void resampleAreaParallelSeparate_y
 		if( top > 0.0f )
 		{
 			// using pitch for helper array since these all arrays have same pitch
-			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * top * factor;
+			value += in_g[(int)floor(py) * pitchf1_out + ix ] * top * factor;
 			py += 1.0f;
 		}
 		while( midy > 0.0f )
 		{
-			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * factor;
+			value += in_g[(int)floor(py) * pitchf1_out + ix ] * factor;
 			py += 1.0f;
 			midy -= 1.0f;
 		}
 		if( bottom > RESAMPLE_EPSILON )
 		{
-			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * bottom * factor;
+			value += in_g[(int)floor(py) * pitchf1_out + ix ] * bottom * factor;
 		}
+		
+		// write back
+		out_g[ index ] = value;
 	}
 }
 
@@ -1466,14 +1472,21 @@ void resampleAreaParallelSeparate (
 		float scalefactor
 	)
 {
-	// TODO: add allocation of help_g, if not allocated	
-
 	// can reduce no of blocks for first pass
 	int gridsize_x = ((nx_out - 1) / LO_BW) + 1;
 	int gridsize_y = ((ny_in - 1) / LO_BH) + 1;
 	
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
+	
+
+	// allocate helper array, if not given
+	bool selfalloctemp = help_g == NULL;
+	if (selfalloctemp)
+	{
+		int pitchBin; // pitch is the same as pitchf1_out
+		cuda_malloc2D( (void**)&help_g, std::max(nx_in, nx_out), std::max(ny_in, ny_out), 1, sizeof(float), &pitchBin );
+	}
 	
 	
 	float hx = (float)nx_in / (float)nx_out;
@@ -1492,7 +1505,9 @@ void resampleAreaParallelSeparate (
 	resampleAreaParallelSeparate_y<<< dimGrid, dimBlock >>>( help_g, out_g, nx_out, ny_out,
 			hy, pitchf1_out, factor );
 
-	// TODO: free help_g if self allocated
+	// cleanup
+	if( selfalloctemp )
+		cutilSafeCall( cudaFree( help_g ) );
 }
 
 //================================================================
@@ -1545,8 +1560,7 @@ void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 //================================================================
 
 
-__global__ void addKernel(const float *increment_g, float *accumulator_g,
-		int nx, int ny, int pitchf1)
+__global__ void addKernel( const float* increment_g, float* accumulator_g, int nx, int ny, int pitchf1 )
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1558,8 +1572,7 @@ __global__ void addKernel(const float *increment_g, float *accumulator_g,
 	}
 }
 
-__global__ void subKernel(const float *increment_g, float *accumulator_g,
-		int nx, int ny, int pitchf1)
+__global__ void subKernel( const float* increment_g, float* accumulator_g, int nx, int ny, int pitchf1 )
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1571,8 +1584,7 @@ __global__ void subKernel(const float *increment_g, float *accumulator_g,
 	}
 }
 
-__global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
-		float value)
+__global__ void setKernel( float* field_g, int nx, int ny, int pitchf1, float value)
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
