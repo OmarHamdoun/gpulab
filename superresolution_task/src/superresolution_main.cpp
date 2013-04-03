@@ -36,6 +36,8 @@
 
 #include <flowlib/flowlib.hpp>
 
+#define TIME_DBG 0
+
 
 int main(int argc, char *argv[])
 {
@@ -68,7 +70,6 @@ int main(int argc, char *argv[])
 
 	int computation_device = 0; //0 = CPU, 1 = GPU
 
-
 	int debug = 0;
 	int outer_iterations_1N = 20;
 	int outer_iterations_NN = 200;
@@ -100,6 +101,12 @@ int main(int argc, char *argv[])
 	for(unsigned i=0;i<imagenames.size();i++){
 		fprintf(stderr," %s",imagenames[i].c_str());
 	}
+
+#if TIME_DBG
+	double overallTime;
+	struct timespec start, end;
+	clock_gettime(CLOCK_MONOTONIC,  &start);
+#endif
 
 	fprintf(stderr,"\nReading Images...");
 	for(unsigned int i=0;i<imagenames.size();i++){
@@ -316,7 +323,14 @@ int main(int argc, char *argv[])
 		// /BOOST REPLACEMENT
 		delete superresolution;
 	}
-
+#if TIME_DBG
+	clock_gettime(CLOCK_MONOTONIC,  &end);
+	overallTime = (end.tv_sec - start.tv_sec) + (double) (end.tv_nsec - start.tv_nsec) * 1e-9;
+	if(computation_device == 1)
+		fprintf(stderr,"\n Time taken by Application on GPU = %f seconds", overallTime);
+	else
+		fprintf(stderr,"\n Time taken by Application on CPU = %f seconds", overallTime);
+#endif
 
 	if(computation_device == 1){
 		size_t total, free;
