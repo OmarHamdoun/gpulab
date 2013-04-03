@@ -41,13 +41,11 @@ FlowLibGpuSOR::FlowLibGpuSOR(int par_nx, int par_ny) :
 		FlowLib(par_nx, par_ny), FlowLibGpu(par_nx, par_ny), FlowLibSOR(par_nx,
 				par_ny)
 {
-
 	cuda_malloc2D((void**) &_penDat, _nx, _ny, 1, sizeof(float), &_pitchf1);
 	cuda_malloc2D((void**) &_penReg, _nx, _ny, 1, sizeof(float), &_pitchf1);
 
 	cuda_malloc2D((void**) &_b1, _nx, _ny, 1, sizeof(float), &_pitchf1);
 	cuda_malloc2D((void**) &_b2, _nx, _ny, 1, sizeof(float), &_pitchf1);
-
 }
 
 FlowLibGpuSOR::~FlowLibGpuSOR()
@@ -519,10 +517,8 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 	__shared__ float shared_du1[SF_BW + 2][SF_BH + 2];
 	__shared__ float shared_du2[SF_BW + 2][SF_BH + 2];
 
-
 	if (x < nx && y < ny)
 	{
-
 		// load data into shared memory
 		shared_regPen[tx][ty] = penaltyr_g[idx];
 		shared_du1[tx][ty]    = du_g[idx];
@@ -704,7 +700,6 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 
 	for (int i = 0; i < outer_iterations; ++i)
 	{
-
 		//robustifications
 		sorflow_update_robustifications_warp_tex_shared<<<dimGrid, dimBlock>>>(
 				u_g, v_g, du_g, dv_g, penaltyd_g, penaltyr_g, nx, ny, hx, hy,
@@ -734,11 +729,9 @@ void sorflow_gpu_nonlinear_warp_level(char* call,const float *u_g, const float *
 float FlowLibGpuSOR::computeFlow()
 {
 	// main algorithm goes here
-	
 	#if VERBOSE
 		fprintf(stderr, "\nComputing flow on GPU" );
 	#endif
-
 
 	//the lambda
 	float lambda = _lambda * 255.0f;
@@ -783,7 +776,6 @@ float FlowLibGpuSOR::computeFlow()
 	#if DEBUG
 		fprintf( stderr, " done" );
  	#endif
-
 
 	//////////////////////////////////////////////////////////////
 	// loop through image pyramide - main algorithm starts here //
@@ -854,8 +846,6 @@ float FlowLibGpuSOR::computeFlow()
 					current_pitch, current_pitch, hx_fine,
 					hy_fine);
 			
-			//catchkernel;
-			
 			#if VERBOSE
 				fprintf(stderr, " done");
 			#endif
@@ -881,7 +871,6 @@ float FlowLibGpuSOR::computeFlow()
 			add_flow_fields<<<dimGrid, dimBlock>>>(_u1lvl, _u2lvl, _u1_g, _u2_g,
 					nx_fine, ny_fine, current_pitch);
 		}
-
 		nx_coarse = nx_fine;
 		ny_coarse = ny_fine;
 
@@ -890,7 +879,6 @@ float FlowLibGpuSOR::computeFlow()
 		#endif
 
 		unbind_textures_flow_sor();
-
 	}
 
 	return -1.0f;

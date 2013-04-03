@@ -125,7 +125,7 @@ __global__ void dualL1Difference_sm
 	
 	// loading the data in shared memory
 	// NOTE: not using shared memory for primal & constant reduces the execution time 
-	// from 127 micro sec to 108 micro sec
+	// from 127 micro sec to 108 micro sec on 48 core GPU
 	if (x < nx && y < ny)//guards
 	{
 		s_dual[tx][ty] = dual[idx];
@@ -227,14 +227,14 @@ __global__ void primal1N_sm
 		s_xi1[tx+1][ty] = xi1[idx];
 		s_xi2[tx][ty+1] = xi2[idx];
 				
-		s_xi1[0][ty] = 0.0f; // removing the loop for x==0 brings slight performance improvement
+		s_xi1[0][ty] = 0.0f; // removing the loop for x == 0 brings slight performance improvement
 		
 		if( threadIdx.x == 0)
 		{
 			s_xi1[0][ty] = xi1[idx-1];
 		}
 		
-		s_xi2[tx][0] = 0.0f; // removing the loop for y==0 brings slight performance improvement
+		s_xi2[tx][0] = 0.0f; // removing the loop for y == 0 brings slight performance improvement
 		
 		if( threadIdx.y == 0 )
 		{
@@ -282,8 +282,6 @@ __global__ void dualTVHuber_gm
 
 	if( x < nx && y < ny ) // guards
 	{
-		//DONT FORGET TO USE THE PITCH
-
 		int x1 = x + 1;
 		if( x1 >= nx ){	x1 = nx-1; }	// at x boundary
 
@@ -291,7 +289,6 @@ __global__ void dualTVHuber_gm
 		if( y1 >= ny ){ y1 = ny-1; }	// at y boundary
 
 		// do xi1_g, xi2_g & uor_g have same pitch ? confirm - YES
-
 		const int p = y * pitchf1 + x;
 
 		float dx = (xi1_g[p] + tau_d * factor_update * (uor_g[y*pitchf1+x1] - uor_g[p])) / huber_denom;
@@ -332,7 +329,7 @@ __global__ void dualTVHuber_sm
 
 	// load data into shared memory
 	// NOTE: not using shared memory for xi1 & xi2 reduces execution time from
-	// 420 to 403 micro sec
+	// 420 to 403 micro sec on 48 core GPU
 	if( x < nx && y < ny ) // guards
 	{
 		uor[tx][ty] = uor_g[idx];
@@ -467,7 +464,6 @@ void computeSuperresolutionUngerGPU
 		std::list<FlowGPU>::iterator flow   = flowsGPU.begin();
 		for( unsigned int k = 0; image != images_g.end() && flow != flowsGPU.end() && k < q_g.size(); ++k, ++flow, ++image )
 		{
-
 				#if TIME_DEBUG
 			    clock_gettime(CLOCK_MONOTONIC,  &backTimeTS1);
 				#endif
@@ -503,16 +499,8 @@ void computeSuperresolutionUngerGPU
 					#endif
 
 					// blur image
-					#if GAUSS_MEMORY == 2
-						// gauss with texture memory
-						gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
-					#elif GAUSS_MEMORY == 1
-						// gauss with shared memory
-						gaussBlurSeparateMirrorGpu_sm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
-					#else
-						// gauss with global memory
-						gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
-					#endif
+					// gauss with global memory
+					gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
 
 					#if TIME_DEBUG
 						clock_gettime(CLOCK_MONOTONIC,  &gauss1TimeTS2);
@@ -585,14 +573,10 @@ void computeSuperresolutionUngerGPU
 					saveCudaImage(cudaDebug,  q_g[k], nx_orig, ny_orig, pitchf1_orig, 1);
 				}
 				#endif
-
-				//	if(i == 5)return;
 		}
 
 		// set 3rd helper array to zero
 		setKernel <<<dimGrid, dimBlock>>>( temp3_g, nx, ny, pitchf1, 0.0f );
-
-		//return;
 
 		// iterating over all images
 		image = images_g.begin();
@@ -619,11 +603,7 @@ void computeSuperresolutionUngerGPU
 			if( blur > 0.0f )
 			{
 				// blur image
-				#if GAUSS_TEXTURE_MEM
-				gaussBlurSeparateMirrorGpu ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
-				#else
 				gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
-				#endif
 
 				#if IMAGE_DEBUG
 				if(i==10 && k==5)
@@ -644,7 +624,6 @@ void computeSuperresolutionUngerGPU
 			#if TIME_DEBUG
 				clock_gettime(CLOCK_MONOTONIC,  &forwardTimeTS1);
 			#endif
-
 
 			// foreward warping
 			forewardRegistrationBilinearAtomic (
@@ -667,9 +646,8 @@ void computeSuperresolutionUngerGPU
 			}
 			#endif
 
-
 			// add 1st to 3rd helper array
-			addKernel <<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
+			addKernel<<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
 		}
 
 		#if IMAGE_DEBUG
@@ -685,7 +663,6 @@ void computeSuperresolutionUngerGPU
 		#else
 	    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 		#endif
-
 	}
 
 	#if TIME_DEBUG

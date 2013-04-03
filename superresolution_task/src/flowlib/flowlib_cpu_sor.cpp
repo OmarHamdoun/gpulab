@@ -93,14 +93,13 @@ float FlowLibCpuSOR::computeFlow()
 			saveFloatImage(_debugbuffer,_I1pyramid->level[rec_depth],nx_fine,ny_fine,1,1.0f,-1.0f);
 			sprintf(_debugbuffer,"debug/CI2 %i.png",rec_depth);
 			saveFloatImage(_debugbuffer,_I2pyramid->level[rec_depth],nx_fine,ny_fine,1,1.0f,-1.0f);
+
+            char* cudaDebug = "1_debug/image1.png";
+			showFloatImage("cudaDebug", _I1pyramid->level[rec_depth], nx_fine, ny_fine,1, 1);
+
+			cudaDebug = "1_debug/image2.png";
+			showFloatImage("cudaDebug", _I2pyramid->level[rec_depth], nx_fine, ny_fine, 1, 1);
 		}
-
-		 char* cudaDebug = "1_debug/image1.png";
-		 showFloatImage("cudaDebug", _I1pyramid->level[rec_depth], nx_fine, ny_fine,1, 1);
-
-		 cudaDebug = "1_debug/image2.png";
-		 showFloatImage("cudaDebug", _I2pyramid->level[rec_depth], nx_fine, ny_fine, 1, 1);
-
 
 		if(rec_depth < max_rec_depth)	{
 			resampleAreaParallelizableSeparate(_u1,_u1,nx_coarse,ny_coarse,nx_fine,ny_fine,_b1);
