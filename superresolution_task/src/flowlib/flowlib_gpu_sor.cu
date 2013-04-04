@@ -37,6 +37,14 @@ bool textures_flow_sor_initialized = false;
 #define SF_BW 16
 #define SF_BH 16
 
+
+#define INTERPOLATE_IMAGES 0
+
+#if INTERPOLATE_IMAGES
+	#include "interpolation.cu"
+#endif
+
+
 FlowLibGpuSOR::FlowLibGpuSOR(int par_nx, int par_ny) :
 		FlowLib(par_nx, par_ny), FlowLibGpu(par_nx, par_ny), FlowLibSOR(par_nx,
 				par_ny)
@@ -880,6 +888,10 @@ float FlowLibGpuSOR::computeFlow()
 
 		unbind_textures_flow_sor();
 	}
+
+	#if INTERPOLATE_IMAGES
+		interpolateImages( _I1pyramid->level[0], _I2pyramid->level[0], _u1_g, _u2_g, _nx, _ny, _pitchf1 );
+	#endif
 
 	return -1.0f;
 }

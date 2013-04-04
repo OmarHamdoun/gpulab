@@ -555,7 +555,7 @@ void forewardRegistrationBilinearAtomic (
 	dim3 dimBlock( LO_BW, LO_BH );
 
 	// reset target array
-	// this cost us hours again, not to do it in the warpi kernel... 
+	// this cost us hours again, not to do it in the warp kernel...
 	setKernel <<< dimGrid, dimBlock >>> ( out_g, nx, ny, pitchf1, 0.0f );
 
 	// invoke atomic warp kernel on gpu
