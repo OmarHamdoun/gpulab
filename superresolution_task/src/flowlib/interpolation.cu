@@ -9,70 +9,6 @@
 #define IMAGES_TO_INTERPOLATE 20
 
 
-
-
-
-
-
-
-__global__ void foreward_warp_kernel_atomic_factor (
-		const float *flow1_g,
-		const float *flow2_g,
-		const float *in_g,
-		float *out_g,
-		int nx,
-		int ny,
-		int pitchf1,
-		float factor
-	)
-{
-	// get thread coordinates and index
-	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	const int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if( x < nx && y < ny )
-	{
-		const unsigned int idx = y * pitchf1 + x;
-
-		// calculate target coordinates: coords + flow values
-		const float xx = (float)x + factor * flow1_g[idx];
-		const float yy = (float)y + factor * flow2_g[idx];
-
-		// continue only if target area inside image
-		if (
-				xx >= 0.0f &&
-				xx <= (float)(nx - 2) &&
-				yy >= 0.0f &&
-				yy <= (float)(ny - 2)
-			)
-		{
-			float xxf = floor(xx);
-			float yyf = floor(yy);
-
-			// target pixel coordinates
-			const int xxi = (int)xxf;
-			const int yyi = (int)yyf;
-
-			xxf = xx - xxf;
-			yyf = yy - yyf;
-
-			// distribute input pixel value to adjacent pixels of target pixel
-			const float in_value = in_g[idx];
-
-			// eject the warp core!
-			// avoid race conditions by use of atomic operations
-			atomicAdd( out_g + (yyi * pitchf1 + xxi),           in_value * (1.0f - xxf) * (1.0f - yyf) );
-			atomicAdd( out_g + (yyi * pitchf1 + xxi + 1),       in_value * xxf * (1.0f - yyf) );
-			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi),     in_value * (1.0f - xxf) * yyf );
-			atomicAdd( out_g + ((yyi + 1) * pitchf1 + xxi + 1), in_value * xxf * yyf );
-		}
-	}
-}
-
-
-
-
-
 // gpu warping kernel with global memory
 __global__ void backwardRegistrationBilinearFunctionGlobalFactorGpu(const float *in_g,
 		const float *flow1_g, const float *flow2_g, float *out_g,
@@ -116,7 +52,6 @@ __global__ void backwardRegistrationBilinearFunctionGlobalFactorGpu(const float 
 
 
 
-
 void interpolateImages
 	(
 		float* image1_g,
@@ -137,9 +72,6 @@ void interpolateImages
 
 	// allocate memory for file names
 	char fileName[128];
-
-	// create output directory
-	// TODO
 
 	// allocate GPU memory for result images
 	float* result_g;

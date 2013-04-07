@@ -631,7 +631,6 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 						  + tex2D( tex_flow_sor_I1, xx, yy + 1 )
 						  - tex2D( tex_flow_sor_I1, xx, yy - 1) ) * hy_1;
 
-		
 		float xp = x < nx - 1 ? ( shared_regPen[x1][ty]  + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
 		float xm = x > 0      ? ( shared_regPen[x_1][ty] + shared_regPen[tx][ty] ) * 0.5f * hx_2 : 0.0f;
 		float yp = y < ny - 1 ? ( shared_regPen[tx][y1]  + shared_regPen[tx][ty] ) * 0.5f * hy_2 : 0.0f;
@@ -788,6 +787,7 @@ float FlowLibGpuSOR::computeFlow()
 	//////////////////////////////////////////////////////////////
 	// loop through image pyramide - main algorithm starts here //
 	//////////////////////////////////////////////////////////////
+
 	for( rec_depth = max_rec_depth; rec_depth >= 0; --rec_depth )
 	{
 		#if VERBOSE

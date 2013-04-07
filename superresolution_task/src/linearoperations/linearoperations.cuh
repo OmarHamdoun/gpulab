@@ -331,8 +331,6 @@ __global__ void setKernel
 		float value
 );
 
-
-// TODO: remove
 __global__ void debugKernel( float *field_g, int nx, int ny, int pitchf1 );
 
 #endif
