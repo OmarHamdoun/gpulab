@@ -18,6 +18,8 @@
 
 #include <flowlib/flowlib.hpp>
 
+#define TIME_DBG 0
+
 int main(int argc, char *argv[])
 {
 
@@ -101,6 +103,12 @@ int main(int argc, char *argv[])
 
   if (arg1 != "camera" && arg1 != "video") {
 
+#if TIME_DBG
+	double overallTime;
+	struct timespec start, end;
+	clock_gettime(CLOCK_MONOTONIC,  &start);
+#endif
+
     cv::Mat img1 = cv::imread(argv[1], 0); // 0 = force the image to be grayscale
     cv::Mat img2 = cv::imread(argv[2], 0);
 
@@ -149,6 +157,15 @@ int main(int argc, char *argv[])
     }
     save_flow_file("output.flo",u, img1.cols, img1.rows);
     delete [] u;
+
+#if TIME_DBG
+	clock_gettime(CLOCK_MONOTONIC,  &end);
+	overallTime = (end.tv_sec - start.tv_sec) + (double) (end.tv_nsec - start.tv_nsec) * 1e-9;
+	if(computationDevice == 1)
+		fprintf(stderr,"\n Time taken by Application on GPU = %f seconds", overallTime);
+	else
+		fprintf(stderr,"\n Time taken by Application on CPU = %f seconds", overallTime);
+#endif
 
     fprintf(stderr,"\nDisplaying Output");
 

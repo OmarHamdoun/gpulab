@@ -44,9 +44,9 @@ timeval startFirstGauss, endFirstGauss;
 #endif
 
 //shared mem flags
-#define SHARED_MEM 1
+#define SHARED_MEM 0
 #define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
-#define GAUSS_MEMORY 1 // 0 = global memory, 1 = shared memory, 2 = texture memory
+#define GAUSS_MEMORY 0 // 0 = global memory, 1 = shared memory, 2 = texture memory
 
 #define TIME_DEBUG 0
 #define IMAGE_DEBUG 0
@@ -59,8 +59,6 @@ timeval startFirstGauss, endFirstGauss;
 	char cudaDebug[128];
 #endif
 
-
-//TODO where the heck should this used
 extern __shared__ float smem[];
 
 //TODO write comment

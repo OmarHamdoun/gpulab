@@ -42,6 +42,12 @@
 int main(int argc, char *argv[])
 {
 
+#if TIME_DBG
+	double overallTime;
+	struct timespec start, end;
+	clock_gettime(CLOCK_MONOTONIC,  &start);
+#endif
+
 	std::string sourcedirname = "data";
 	std::string resultdirname = "results";
 
@@ -101,12 +107,6 @@ int main(int argc, char *argv[])
 	for(unsigned i=0;i<imagenames.size();i++){
 		fprintf(stderr," %s",imagenames[i].c_str());
 	}
-
-#if TIME_DBG
-	double overallTime;
-	struct timespec start, end;
-	clock_gettime(CLOCK_MONOTONIC,  &start);
-#endif
 
 	fprintf(stderr,"\nReading Images...");
 	for(unsigned int i=0;i<imagenames.size();i++){

@@ -17,13 +17,33 @@
  *      Author: steinbrf
  */
 
+/*
+ * Although it may depend on the graphics card, the performance gain of using the interpolation
+ * of the texture memory was hardly noticeable. Anyway, texture memory is faster than global
+ * memory, even with software interpolation, due to random access.
+ *
+ * We are creating the kernels for the gaussian convolution only once (at the first call) and
+ * leave them in constant memory. This may not be intended for other applications, but in the
+ * superresolution task it is advantageous.
+ *
+ * As the gaussian convolution is a linear operation, it should be possible to combine the
+ * separate convolutions for x and y direction in one kernel.
+ *
+ */
+
 #include <auxiliary/cuda_basic.cuh>
 #include <iostream>
 #include <linearoperations/linearoperations.cuh>
 
 // TEXTURES
 
+// Use hardware interpolation instead of software interpolation
+// in bilinear interpolation kernels with texture memory
+
+#define USE_HARDWARE_INTERPOLATION	  0
+
 #define TEXTURE_OFFSET      0.5f  // offset for indexing textures
+
 cudaChannelFormatDesc linearoperation_float_tex = cudaCreateChannelDesc<float>();
 texture<float, cudaTextureType2D, cudaReadModeElementType> tex_linearoperation;
 bool linearoperation_textures_initialized = false;
@@ -35,6 +55,7 @@ bool linearoperation_textures_initialized = false;
 
 __constant__ float constKernelX[MAXKERNELSIZE];
 __constant__ float constKernelY[MAXKERNELSIZE];
+// create and bind the gaussian convolution kernels only once
 bool constant_kernel_bound = false;
 
 void gpu_bindKernelToConstantMemory_x ( const float* kernel_x, const int size ) 
@@ -143,6 +164,7 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 	
 	if( x < nx && y < ny )
 	{
+		// backwards warped coordinates
 		float hx_1 = 1.0f / hx;
 		float hy_1 = 1.0f / hy;
 	
@@ -158,7 +180,7 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 		}
 		else
 		{
-			// get output value by taking the 4 pixel surround the taget point into account
+			// interpolate between the 4 pixels around target coordinates
 
 			// left and upper pixel coordinates
 			int xx = (int)ii_fp;
@@ -170,6 +192,7 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 			float xx_rest = ii_fp - (float)xx;
 			float yy_rest = jj_fp - (float)yy;
 	
+			// interpolate...
 			out_g[y * pitchf1_out + x] =
 					(1.0f - xx_rest) * (1.0f - yy_rest) * tex2D( tex_linearoperation, xx, yy )
 					+ xx_rest * (1.0f - yy_rest)        * tex2D( tex_linearoperation, xx1, yy )
@@ -179,21 +202,63 @@ __global__ void backwardRegistrationBilinearValueTexKernel (
 	}
 }
 
-/*
- * Texture memory version
- */
-void backwardRegistrationBilinearValueTex (
-		float* in_g,			// _u_overrelaxed
-		const float* flow1_g,	// flow->u1
-		const float* flow2_g,	// flow->u2
-		float* out_g,			// _help1
-		float value,			// 0.0f
+__global__ void backwardRegistrationBilinearValueTexInterpolationKernel (
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		float value,
 		int nx,
 		int ny,
 		int pitchf1_in,
 		int pitchf1_out,
-		float hx,				// 1.0f
-		float hy				// 1.0f
+		float hx,
+		float hy
+	)
+{
+	// thread coordinates
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+	
+	if( x < nx && y < ny )
+	{
+		// backwards warped coordinates
+		float hx_1 = 1.0f / hx;
+		float hy_1 = 1.0f / hy;
+	
+		// get target area, where flow points at
+		float xx = x + (flow1_g[y * pitchf1_in + x] * hx_1);
+		float yy = y + (flow2_g[y * pitchf1_in + x] * hy_1);
+	
+		// set result to a given value, if the flow points outside the image or is not a number
+		if( (xx < 0.0f) || (yy < 0.0f || !isfinite( xx ) || !isfinite( yy ) )
+					 || (xx > (float)(nx - 1)) || (yy > (float)(ny - 1)) )
+		{
+			out_g[y * pitchf1_out + x] = value;
+		}
+		else
+		{
+			// interpolate between the 4 pixels around target coordinates
+			out_g[y * pitchf1_out + x] =
+					tex2D( tex_linearoperation, xx + TEXTURE_OFFSET, yy + TEXTURE_OFFSET );
+		}
+	}
+}
+
+/*
+ * Texture memory version
+ */
+void backwardRegistrationBilinearValueTex (
+		float* in_g,
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		float value,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
 	)
 {
 	// block and grid size
@@ -206,13 +271,24 @@ void backwardRegistrationBilinearValueTex (
 	// TODO: has texture to be bound every time?
 
 	// prepare texture
-	setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+	#if USE_HARDWARE_INTERPOLATION
+		setTexturesLinearOperations( 1, 0 ); // filter mode: linear, address mode: clamping
+	#else
+		setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+	#endif
+
 
 	// bind input image to texture
 	gpu_bindTextureMemory( in_g, nx, ny, pitchf1_in * sizeof(float) );
 
+#if USE_HARDWARE_INTERPOLATION
+	backwardRegistrationBilinearValueTexInterpolationKernel<<<dimGrid, dimBlock>>>
+			( flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
+#else
 	backwardRegistrationBilinearValueTexKernel<<<dimGrid, dimBlock>>>
-		( flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
+			( flow1_g, flow2_g, out_g, value, nx, ny, pitchf1_in, pitchf1_out, hx, hy );
+#endif
+
 
 	// release texture
 	gpu_unbindTextureMemory();
@@ -243,20 +319,25 @@ __global__ void backwardRegistrationBilinearValueTexKernel_gm
 	
 	if( x < nx && y < ny )
 	{
+		// backwards warped coordinates
 		float ii_fp = x + (flow1_g[y * pitchf1_in + x] / hx);
 		float jj_fp = y + (flow2_g[y * pitchf1_in + x] / hy);
 	
-		if( (ii_fp < 0.0f) || (jj_fp < 0.0f)
-					 || (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1)) )
+		// set result to a given value, if the flow points outside the image or is not a number
+		if (
+				   (ii_fp < 0.0f) || (jj_fp < 0.0f)
+				|| (ii_fp > (float)(nx - 1)) || (jj_fp > (float)(ny - 1))
+				|| !isfinite( ii_fp ) || !isfinite( jj_fp )
+			)
 		{
+			// if not, use given value
 			out_g[y * pitchf1_out + x] = value;
-		}
-		else if( !isfinite( ii_fp ) || !isfinite( jj_fp ) )
-		{	
-			out_g[ y * pitchf1_out + x] = value;
 		}
 		else
 		{
+			// interpolate between the 4 target pixels
+
+			// prepare coordinates for interpolation
 			int xx = (int)ii_fp;
 			int yy = (int)jj_fp;
 	
@@ -266,6 +347,7 @@ __global__ void backwardRegistrationBilinearValueTexKernel_gm
 			float xx_rest = ii_fp - (float)xx;
 			float yy_rest = jj_fp - (float)yy;
 	
+			// interpolate between pixels around target coordinates
 			out_g[y * pitchf1_out + x] =
 					(1.0f - xx_rest) * (1.0f - yy_rest) * in_g[yy  * pitchf1_in + xx]
 					+ xx_rest * (1.0f - yy_rest)        * in_g[yy  * pitchf1_in + xx1]
@@ -279,17 +361,17 @@ __global__ void backwardRegistrationBilinearValueTexKernel_gm
  * Global memory version for speed comparison
  */
 void backwardRegistrationBilinearValueTex_gm (
-		const float* in_g,		// _u_overrelaxed
-		const float* flow1_g,	// flow->u1
-		const float* flow2_g,	// flow->u2
-		float* out_g,			// _help1
-		float value,			// 0.0f
+		const float* in_g,
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		float value,
 		int nx,
 		int ny,
 		int pitchf1_in,
 		int pitchf1_out,
-		float hx,				// 1.0f
-		float hy				// 1.0f
+		float hx,
+		float hy
 	)
 {
 	// block and grid size
@@ -323,9 +405,11 @@ __global__ void backwardRegistrationBilinearFunctionGlobalGpu(const float *in_g,
 	// check if x is within the boundaries
 	if (x < nx && y < ny)
 	{
+		// backwards warped coordinates
 		const float xx = (float) x + flow1_g[y * pitchf1_in + x] / hx;
 		const float yy = (float) y + flow2_g[y * pitchf1_in + x] / hy;
 
+		// prepare coordinates for interpolation
 		int xxFloor = (int) floor(xx);
 		int yyFloor = (int) floor(yy);
 
@@ -335,19 +419,23 @@ __global__ void backwardRegistrationBilinearFunctionGlobalGpu(const float *in_g,
 		float xxRest = xx - (float) xxFloor;
 		float yyRest = yy - (float) yyFloor;
 
-		//same weird expression as in cpp
+		// interpolate between the 4 target pixels
 		out_g[y * pitchf1_out + x] =
-				(xx < 0.0f || yy < 0.0f || xx > (float) (nx - 1)
-						|| yy > (float) (ny - 1)) ?
-						constant_g[y * pitchf1_in + x] :
-						(1.0f - xxRest) * (1.0f - yyRest)
-								* in_g[yyFloor * pitchf1_in + xxFloor]
-								+ xxRest * (1.0f - yyRest)
-										* in_g[yyFloor * pitchf1_in + xxCeil]
-								+ (1.0f - xxRest) * yyRest
-										* in_g[yyCeil * pitchf1_in + xxFloor]
-								+ xxRest * yyRest
-										* in_g[yyCeil * pitchf1_in + xxCeil];
+				// check, if warped coordinates are within image boundary
+				(xx < 0.0f || yy < 0.0f || xx > (float)(nx - 1) || yy > (float)(ny - 1))
+				?
+					// if not, take grey values from target image (to which we warp the actual one)
+					constant_g[y * pitchf1_in + x]
+			    :
+					// interpolate between pixels around target coordinates
+					  (1.0f - xxRest) * (1.0f - yyRest)
+					  	* in_g[yyFloor * pitchf1_in + xxFloor]
+					+ xxRest * (1.0f - yyRest)
+						* in_g[yyFloor * pitchf1_in + xxCeil]
+					+ (1.0f - xxRest) * yyRest
+						* in_g[yyCeil * pitchf1_in + xxFloor]
+					+ xxRest * yyRest
+						* in_g[yyCeil * pitchf1_in + xxCeil];
 
 	}
 }
@@ -397,9 +485,11 @@ __global__ void backwardRegistrationBilinearFunctionTextureGpu
 	// check if x is within the boundaries
 	if (x < nx && y < ny)
 	{
+		// backwards warped coordinates
 		const float xx = (float) x + flow1_g[y * pitchf1_in + x] / hx;
 		const float yy = (float) y + flow2_g[y * pitchf1_in + x] / hy;
 
+		// prepare coordinates for software interpolation
 		int xxFloor = (int) floor(xx);
 		int yyFloor = (int) floor(yy);
 
@@ -409,12 +499,15 @@ __global__ void backwardRegistrationBilinearFunctionTextureGpu
 		float xxRest = xx - (float) xxFloor;
 		float yyRest = yy - (float) yyFloor;
 
-		//same weird expression as in cpp
+		// interpolate between the 4 target pixels
 		out_g[y * pitchf1_out + x] =
+				// check, if warped coordinates are within image boundary
 				(xx < 0.0f || yy < 0.0f || xx > (float) (nx - 1) || yy > (float) (ny - 1))
 				?
+					// if not, take grey values from target image (to which we warp the actual one)
 					constant_g[y * pitchf1_in + x]
 				:
+					// interpolate between pixels around target coordinates
 					  (1.0f - xxRest) * (1.0f - yyRest) * tex2D( tex_linearoperation, xxFloor, yyFloor ) // ingen offset 
 					+ xxRest          * (1.0f - yyRest) * tex2D( tex_linearoperation, xxCeil,  yyFloor )
 					+ (1.0f - xxRest) * yyRest          * tex2D( tex_linearoperation, xxFloor, yyCeil )
@@ -423,7 +516,44 @@ __global__ void backwardRegistrationBilinearFunctionTextureGpu
 	}
 }
 
-// TODO: compare speed with gm version
+// gpu warping kernel with texture memory and hardware interpolation
+__global__ void backwardRegistrationBilinearFunctionTextureInterpolationGpu
+	(
+		const float* flow1_g,
+		const float* flow2_g,
+		float* out_g,
+		const float *constant_g,
+		int nx,
+		int ny,
+		int pitchf1_in,
+		int pitchf1_out,
+		float hx,
+		float hy
+	)
+{
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	// check if x is within the boundaries
+	if (x < nx && y < ny)
+	{
+		// backwards warped coordinates
+		const float xx = (float) x + flow1_g[y * pitchf1_in + x] / hx;
+		const float yy = (float) y + flow2_g[y * pitchf1_in + x] / hy;
+
+		out_g[y * pitchf1_out + x] =
+				// check, if warped coordinates are within image boundary
+				(xx < 0.0f || yy < 0.0f || xx > (float)(nx - 1) || yy > (float)(ny - 1))
+				?
+					// if not, take grey values from target image (to which we warp the actual one)
+					constant_g[y * pitchf1_in + x]
+				:
+					// using GPU interpolation hardware
+					tex2D( tex_linearoperation, xx + TEXTURE_OFFSET, yy + TEXTURE_OFFSET );
+
+	}
+}
+
 void backwardRegistrationBilinearFunctionTex
 	(
 		const float* in_g,
@@ -449,14 +579,24 @@ void backwardRegistrationBilinearFunctionTex
 	// TODO: has texture to be bound every time?
 
 	// prepare texture
-	setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+	#if USE_HARDWARE_INTERPOLATION
+		setTexturesLinearOperations( 1, 0 ); // filter mode: linear, address mode: clamping
+	#else
+		setTexturesLinearOperations( 0, 0 ); // filter mode: point (no offset necessary), address mode: clamping
+	#endif
 
 	// bind input image to texture
 	gpu_bindTextureMemory( in_g, nx, ny, pitchf1_in * sizeof(float) );
 
-	backwardRegistrationBilinearFunctionTextureGpu<<<dimGrid, dimBlock>>>(
-			flow1_g, flow2_g, out_g, constant_g, nx, ny, pitchf1_in,
-			pitchf1_out, hx, hy );
+	#if USE_HARDWARE_INTERPOLATION
+		backwardRegistrationBilinearFunctionTextureInterpolationGpu<<<dimGrid, dimBlock>>>(
+					flow1_g, flow2_g, out_g, constant_g, nx, ny, pitchf1_in,
+					pitchf1_out, hx, hy );
+	#else
+		backwardRegistrationBilinearFunctionTextureGpu<<<dimGrid, dimBlock>>>(
+				flow1_g, flow2_g, out_g, constant_g, nx, ny, pitchf1_in,
+				pitchf1_out, hx, hy );
+	#endif
 
 	// release texture
 	gpu_unbindTextureMemory();
@@ -1066,9 +1206,6 @@ __global__ void gaussBlurSeparateMirrorGPU_sm_cm_x
 	// update chunk width (inside image)
 	chunkWidth = min( chunkX + chunkWidth, iWidth ) - chunkX; // -= chunkX + chunkWidth > iWidth ? iWidth - chunkX : 0; 
 
-	// get updated chunk pos (inside image)
-	//chunkX += chunkOffX;
-
 	// number of pixels
 	int pixelNum = chunkPitch * LO_BH; // = chunkPitch * chunkHeight
 
@@ -1180,9 +1317,6 @@ __global__ void gaussBlurSeparateMirrorGPU_sm_cm_y
 
 	// update chunk height (inside image)
 	chunkHeight = min( chunkY + chunkHeight, iHeight ) - chunkY; // -= chunkY + chunkHeight > iHeight ? iHeight - chunkY : 0; 
-
-	// get updated chunk pos (inside image)
-	// ich bechunkY += chunkOffY;
 
 	// number of pixels
 	int pixelNum = LO_BW * chunkHeight; // = chunkPitch * chunkHeight
@@ -1376,20 +1510,17 @@ __global__ void resampleAreaParallelSeparate_x
 		
 		if( left > 0.0f )
 		{
-			// using pitchf1_in instead of nx_orig in original code
-			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * left * factor; // look out for conversion of coordinates
+			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * left * factor;
 			px += 1.0f;
 		}
 		while( midx > 0.0f )
 		{
-			// using pitchf1_in instead of nx_orig in original code
 			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * factor;
 			px += 1.0f;
 			midx -= 1.0f;
 		}
 		if( right > RESAMPLE_EPSILON )
 		{
-			// using pitchf1_in instead of nx_orig in original code
 			out_g[index] += in_g[ iy * pitchf1_in + (int)floor(px) ] * right * factor;
 		}
 	}
@@ -1409,7 +1540,6 @@ __global__ void resampleAreaParallelSeparate_y
 	const int ix = threadIdx.x + blockIdx.x * blockDim.x;
 	const int iy = threadIdx.y + blockIdx.y * blockDim.y;
 	const int index = ix + iy * pitchf1_out; // global index for out image
-	// used pitch instead  of blockDim.x
 	
 	if( factor == 0.0f )
 		factor = 1.0f / hy;
@@ -1431,7 +1561,6 @@ __global__ void resampleAreaParallelSeparate_y
 		
 		if( top > 0.0f )
 		{
-			// using pitch for helper array since these all arrays have same pitch
 			out_g[index] += in_g[(int)floor(py) * pitchf1_out + ix ] * top * factor;
 			py += 1.0f;
 		}
@@ -1462,8 +1591,6 @@ void resampleAreaParallelSeparate (
 		float scalefactor
 	)
 {
-	// TODO: add allocation of help_g, if not allocated	
-
 	// can reduce no of blocks for first pass
 	int gridsize_x = ((nx_out - 1) / LO_BW) + 1;
 	int gridsize_y = ((ny_in - 1) / LO_BH) + 1;
@@ -1471,6 +1598,18 @@ void resampleAreaParallelSeparate (
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
+	//-----------------------
+	// memory preparation
+	//-----------------------
+
+	// allocate helper array, if not given
+	bool selfalloctemp = help_g == NULL;
+	if (selfalloctemp)
+	{
+		// pitch should be the same as output pitch
+		cuda_malloc2D( (void**)&help_g, std::max( nx_in, nx_out ), std::max( ny_in, ny_out ),
+				1, sizeof(float), &pitchf1_out );
+	}
 	
 	float hx = (float)nx_in / (float)nx_out;
 	float factor = (float)(nx_out)/(float)(nx_in);
@@ -1488,7 +1627,12 @@ void resampleAreaParallelSeparate (
 	resampleAreaParallelSeparate_y<<< dimGrid, dimBlock >>>( help_g, out_g, nx_out, ny_out,
 			hy, pitchf1_out, factor );
 
-	// TODO: free help_g if self allocated
+	//-----------------------
+	// cleanup
+	//-----------------------
+
+	if( selfalloctemp )
+		cutilSafeCall( cudaFree( help_g ) );
 }
 
 //================================================================
@@ -1499,25 +1643,25 @@ void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 		int nx_in, int ny_in, int pitchf1_in, int nx_out, int ny_out,
 		int pitchf1_out, float *help_g, float scalefactor)
 {	
-	/*  Here, 
-	 * in_g = q_g[k]   	nx_orig, ny_orig, pitchf1_orig
-	 * out_g = temp1_g 	nx,ny,pitchf1
-	 * (nx_in, ny_in) = ( nx_orig, ny_orig)
-	 * pitchf1_in  = pitchf1_orig
-	 * (nx_out,ny_out) = (nx, ny )
-	 * pitchf1_out = pitchf1
-	 * help_g = temp4_g
-	 * scalefactor = 1.00f (default value)
-	 */
-	
-	// TODO: add allocation of help_g, if not allocated
-	
 	int gridsize_x = ( nx_out % LO_BW ) ? (nx_out / LO_BW) + 1 : (nx_out / LO_BW);
 	int gridsize_y = ( ny_in % LO_BH ) ? ( ny_in / LO_BH ) + 1 : ( ny_in / LO_BH );
-	
+
 	dim3 dimGrid( gridsize_x, gridsize_y );
 	dim3 dimBlock( LO_BW, LO_BH );
 	
+	//-----------------------
+	// memory preparation
+	//-----------------------
+
+	// allocate helper array, if not given
+	bool selfalloctemp = help_g == NULL;
+	if (selfalloctemp)
+	{
+		// pitch is the same as output pitch
+		cuda_malloc2D( (void**)&help_g, std::max( nx_in, nx_out ), std::max( ny_in, ny_out ),
+				1, sizeof(float), &pitchf1_out );
+	}
+
 	float hx = (float)(nx_in)/(float)(nx_out);
 	resampleAreaParallelSeparate_x<<<dimGrid, dimBlock>>>( in_g, help_g, nx_out, ny_in, hx, pitchf1_in, pitchf1_out, 1.0f);
 		
@@ -1528,7 +1672,12 @@ void resampleAreaParallelSeparateAdjoined(const float *in_g, float *out_g,
 	
 	resampleAreaParallelSeparate_y<<<dimGrid, dimBlock>>>( help_g, out_g, nx_out, ny_out, hy, pitchf1_out, scalefactor );	
 	
-	// TODO: free help_g if self allocated
+	//-----------------------
+	// cleanup
+	//-----------------------
+
+	if( selfalloctemp )
+		cutilSafeCall( cudaFree( help_g ) );
 }
 
 
@@ -1577,7 +1726,6 @@ __global__ void setKernel(float *field_g, int nx, int ny, int pitchf1,
 	}
 }
 
-// TODO: remove
 // philipp's great debugging kernel, altered to produce a pattern of diagonal lines
 __global__ void debugKernel( float *field_g, int nx, int ny, int pitchf1 )
 {
