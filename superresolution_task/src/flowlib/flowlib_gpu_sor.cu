@@ -31,7 +31,6 @@ bool textures_flow_sor_initialized = false;
 #define IMAGE_FILTER_METHOD cudaFilterModeLinear
 #define SF_TEXTURE_OFFSET 0.5f
 
-#define DEBUG 0
 #define VERBOSE 0
 
 #define SF_BW 16
@@ -256,11 +255,11 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		unsigned int sm_yminus1 = y == 0      ? ty : ty - 1;
 		unsigned int sm_yplus1  = y == ny - 1 ? ty : ty + 1;
 
-		//global texture indices
+		// global texture indices
 		const float xx = (float)x + SF_TEXTURE_OFFSET;
 		const float yy = (float)y + SF_TEXTURE_OFFSET;
 
-		//calculate Ix, Iy
+		// calculate image derivatives
 		float Ix = 0.5f	 * (tex2D( tex_flow_sor_I2, xx + 1, yy )
 						  - tex2D( tex_flow_sor_I2, xx - 1, yy )
 						  + tex2D( tex_flow_sor_I1, xx + 1, yy )
@@ -272,9 +271,11 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 						  + tex2D(tex_flow_sor_I1, xx, yy + 1)
 						  - tex2D(tex_flow_sor_I1, xx, yy - 1)) * hy_1;		
 		
+		// get image difference
 		float It = tex2D( tex_flow_sor_I2, xx, yy )
 				 - tex2D( tex_flow_sor_I1, xx, yy );
 
+		// calculate flow derivatives
 		double dxu = (shared_u1[sm_xplus1][ty]  - shared_u1[sm_xminus1][ty]
 				    + shared_du1[sm_xplus1][ty] - shared_du1[sm_xminus1][ty])
 				    * hx_1;
@@ -420,11 +421,11 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		unsigned int sm_yminus1 = y == 0      ? ty : ty - 1;
 		unsigned int sm_yplus1  = y == ny - 1 ? ty : ty + 1;
 
-		//global texture indices
+		// global texture indices
 		const float xx = (float)x + SF_TEXTURE_OFFSET;
 		const float yy = (float)y + SF_TEXTURE_OFFSET;
 
-		//calculate Ix, Iy
+		// calculate image derivatives
 		float Ix = 0.5f	 * (tex2D( tex_flow_sor_I2, xx + 1, yy )
 						  - tex2D( tex_flow_sor_I2, xx - 1, yy )
 						  + tex2D( tex_flow_sor_I1, xx + 1, yy )
@@ -436,6 +437,7 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 						  + tex2D(tex_flow_sor_I1, xx, yy + 1)
 						  - tex2D(tex_flow_sor_I1, xx, yy - 1)) * hy_1;		
 		
+		// get image difference
 		float It = tex2D( tex_flow_sor_I2, xx, yy )
 				 - tex2D( tex_flow_sor_I1, xx, yy );
 		
@@ -605,13 +607,13 @@ __global__ void add_flow_fields(const float *du_g, const float *dv_g,
 		unsigned int y_1 = y == 0      ? ty : ty - 1;
 		unsigned int y1  = y == ny - 1 ? ty : ty + 1;
 
-		//global texture indices
+		// global texture indices
 		const float xx = (float) x + SF_TEXTURE_OFFSET;
 		const float yy = (float) y + SF_TEXTURE_OFFSET;
 
 		float lala = tex2D( tex_flow_sor_I2, xx + 1, yy );
 
-		//calculate Ix, Iy
+		// calculate image derivatives
 		float Ix = 0.5f	 * (tex2D( tex_flow_sor_I2, xx + 1, yy )
 						  - tex2D( tex_flow_sor_I2, xx - 1, yy )
 						  + tex2D( tex_flow_sor_I1, xx + 1, yy )
@@ -729,7 +731,7 @@ float FlowLibGpuSOR::computeFlow()
 {
 	// main algorithm goes here
 	#if VERBOSE
-		fprintf(stderr, "\nComputing flow on GPU" );
+		fprintf(stderr, "\nComputing flow on GPU..." );
 	#endif
 
 	//the lambda
@@ -754,10 +756,6 @@ float FlowLibGpuSOR::computeFlow()
 	if (max_rec_depth >= _I1pyramid->nl)
 		max_rec_depth = _I1pyramid->nl - 1;
 
-	#if DEBUG
-		fprintf( stderr,"\nmax_rec_depth=%d, warp_max_levels=%d", max_rec_depth, warp_max_levels );
-	#endif
-
 	// initial grid and block dimensionslow  SOR
 	int initial_ngx = (_nx % SF_BW) ? ((_nx / SF_BW) + 1) : (_nx / SF_BW);
 	int initial_ngy = (_ny % SF_BH) ? ((_ny / SF_BH) + 1) : (_ny / SF_BH);
@@ -765,16 +763,8 @@ float FlowLibGpuSOR::computeFlow()
 	dim3 initial_dimBlock(SF_BW, SF_BH);
 
 	// initialize horizontal and vertical components of the flow
-	#if VERBOSE
-		fprintf( stderr, "\nInitializing flow components..." );
-	#endif
-	
 	setKernel <<<initial_dimGrid, initial_dimBlock>>>( _u1_g, _nx, _ny, _pitchf1, 0.0f );
 	setKernel <<<initial_dimGrid, initial_dimBlock>>>( _u2_g, _nx, _ny, _pitchf1, 0.0f );
-
-	#if DEBUG
-		fprintf( stderr, " done" );
- 	#endif
 
 	//////////////////////////////////////////////////////////////
 	// loop through image pyramide - main algorithm starts here //
@@ -783,8 +773,8 @@ float FlowLibGpuSOR::computeFlow()
 	for( rec_depth = max_rec_depth; rec_depth >= 0; --rec_depth )
 	{
 		#if VERBOSE
-			fprintf( stderr, "\n\nStart iteration %d", rec_depth );
- 	 	#endif
+			fprintf(stderr, " %d", rec_depth );
+		#endif
 		
 		//get image values for this interation
 		nx_fine = _I1pyramid->nx[rec_depth];
@@ -792,12 +782,6 @@ float FlowLibGpuSOR::computeFlow()
 
 		hx_fine = (float) _nx / (float) nx_fine;
 		hy_fine = (float) _ny / (float) ny_fine;
-
-		#if DEBUG
-			fprintf(stderr,
-				"\nlevel=%d, (rec_depth=%d) ===> nx_fine=%d, ny_fine=%d, nx_coarse=%d, ny_coarse=%d, hx_fine=%f, hy_fine=%f",
-				max_rec_depth - rec_depth, rec_depth, nx_fine, ny_fine, nx_coarse, ny_coarse, hx_fine, hy_fine);
- 	 	#endif
 
 		// current grid and block dimensions
 		int ngx = (nx_fine % SF_BW) ? ((nx_fine / SF_BW) + 1) : (nx_fine / SF_BW);
@@ -808,56 +792,32 @@ float FlowLibGpuSOR::computeFlow()
 		// upsample flowfield to current level
 		if( rec_depth < max_rec_depth )
 		{
-			#if VERBOSE
-				fprintf(stderr, "\nResampling flow field...");
-			#endif
-
 			resampleAreaParallelSeparate(_u1_g, _u1_g, nx_coarse, ny_coarse,
 					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
 					_I2pyramid->pitch[rec_depth], _b1);
 			resampleAreaParallelSeparate(_u2_g, _u2_g, nx_coarse, ny_coarse,
 					_I2pyramid->pitch[rec_depth + 1], nx_fine, ny_fine,
 					_I2pyramid->pitch[rec_depth], _b2);
-			
-			#if VERBOSE
-				fprintf(stderr, " done");
-			#endif
 		}
 
-		//bind resampled images
+		// bind resampled images to texture memory
 		int current_pitch = _I1pyramid->pitch[rec_depth];
 		bind_textures(_I1pyramid->level[rec_depth],
 				_I2pyramid->level[rec_depth], nx_fine, ny_fine, current_pitch);
 
-		#if DEBUG
-			fprintf( stderr, "\nrec_depth=%i, _end_level=%i", rec_depth, _end_level );
-		#endif
-
 		if( rec_depth >= _end_level )
 		{
-			#if VERBOSE
-				fprintf(stderr, "\nWarping Image 2...");
-			#endif
-							
-			// warp original image by resized flow field
+			// warp image 2 by resized flow field
 			backwardRegistrationBilinearFunctionTex(
 					_I2pyramid->level[rec_depth], _u1_g, _u2_g, _I2warp,
 					_I1pyramid->level[rec_depth], nx_fine, ny_fine,
 					current_pitch, current_pitch, hx_fine,
 					hy_fine);
-			
-			#if VERBOSE
-				fprintf(stderr, " done");
-			#endif
 
 			// update I2 with warped image
 			update_textures_flow_sor(_I2warp, nx_fine, ny_fine, current_pitch);
 
-			//set du/dv to zero
-			setKernel <<<dimGrid, dimBlock>>>( _u1lvl, nx_fine, ny_fine, current_pitch, 0.0f );
-			setKernel <<<dimGrid, dimBlock>>>( _u2lvl, nx_fine, ny_fine, current_pitch, 0.0f );
-
-			//set du/dv to zero
+			// reset flow increment du/dv to zero
 			setKernel <<<dimGrid, dimBlock>>>( _u1lvl, nx_fine, ny_fine, current_pitch, 0.0f );
 			setKernel <<<dimGrid, dimBlock>>>( _u2lvl, nx_fine, ny_fine, current_pitch, 0.0f );
 
@@ -867,16 +827,14 @@ float FlowLibGpuSOR::computeFlow()
 					hy_fine, lambda, _overrelaxation, _oi, _ii, _dat_epsilon,
 					_reg_epsilon);
 
-			// add the flow fields
+			// add the flow increments to the flow fields
 			add_flow_fields<<<dimGrid, dimBlock>>>(_u1lvl, _u2lvl, _u1_g, _u2_g,
 					nx_fine, ny_fine, current_pitch);
 		}
+		
+		// update image size for next pyramid level
 		nx_coarse = nx_fine;
 		ny_coarse = ny_fine;
-
-		#if VERBOSE
-			fprintf( stderr, "\nEnd of iteration %d", rec_depth );
-		#endif
 
 		unbind_textures_flow_sor();
 	}

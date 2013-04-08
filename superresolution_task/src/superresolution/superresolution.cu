@@ -48,15 +48,7 @@ timeval startFirstGauss, endFirstGauss;
 #define BACKWARDSWARPING_VALUE_TEXTURE_MEM 1
 #define GAUSS_MEMORY 0 // 0 = global memory, 1 = shared memory, 2 = texture memory
 
-#define IMAGE_DEBUG 0
-
 #include <linearoperations/linearoperations.h>
-
-#if IMAGE_DEBUG
-	#define IMAGE_DEBUG_IMAGE 20
-	int IMAGE_DEBUG_CALL_NUM = 0;
-	char cudaDebug[128];
-#endif
 
 extern __shared__ float smem[];
 
@@ -140,7 +132,7 @@ __global__ void primal1N_gm
 }
 
 __global__ void primal1N_sm
-(
+	(
 		const float *xi1,
 		const float *xi2,
 		const float *degraded,
@@ -153,7 +145,7 @@ __global__ void primal1N_sm
 		float factor_degrade_update,
 		float tau_p,
 		float overrelaxation
-)
+	)
 {
 	const int x = threadIdx.x + blockDim.x * blockIdx.x;
 	const int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -172,20 +164,20 @@ __global__ void primal1N_sm
 		s_xi1[tx+1][ty] = xi1[idx];
 		s_xi2[tx][ty+1] = xi2[idx];
 				
-		// removing the loop for x == 0 brings slight performance improvement
-		// (idle threads had to wait anyway)
-		s_xi1[0][ty] = 0.0f;
-		
-		if( threadIdx.x == 0)
+		if( x == 0 )
+		{
+			s_xi1[0][ty] = 0.0f;
+		}
+		else if( threadIdx.x == 0)
 		{
 			s_xi1[0][ty] = xi1[idx-1];
 		}
 		
-		// removing the loop for y == 0 brings slight performance improvement
-		// (idle threads had to wait anyway)
-		s_xi2[tx][0] = 0.0f;
-		
-		if( threadIdx.y == 0 )
+		if( y == 0 )
+		{
+			s_xi2[tx][0] = 0.0f;
+		}
+		else if( threadIdx.y == 0 )
 		{
 			s_xi2[tx][0] = xi2[idx-pitch];
 		}
@@ -319,7 +311,7 @@ __global__ void dualTVHuber_sm
 }
 
 void computeSuperresolutionUngerGPU
-(
+	(
 		float *xi1_g, 							// Dual Variable for TV regularization in X direction
 		float *xi2_g,							// Dual Variable for TV regularization in Y direction
 		float *temp1_g,							// Helper array
@@ -348,7 +340,7 @@ void computeSuperresolutionUngerGPU
 		float &blur,							// The amount of Gaussian Blur present in the degrading process
 		float &overrelaxation,					// Overrelaxation parameter in the range of [1,2]
 		int   debug								// Debug Flag, if activated the class produces Debug output.
-)
+	)
 {
 	// grid and block dimensions
 	int gridsize_x = ((nx - 1) / SR_BW) + 1;
@@ -392,15 +384,6 @@ void computeSuperresolutionUngerGPU
 				( uor_g, xi1_g, xi2_g, nx, ny, pitchf1, factor_tv_update, factor_tv_clipping, huber_denom_tv, tau_d );
 		#endif
 
-		#if IMAGE_DEBUG
-			if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 )
-			{
-				fprintf( stderr, "\nSaving uor..." );
-				snprintf( cudaDebug, 128, "debug/superresolution/%02d_02_uor_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-				saveCudaImage( cudaDebug, uor_g, nx, ny, pitchf1, 1 );
-			}
-		#endif
-
 		// DUAL DATA
 		// iterating over all images
 		std::vector<float*>::iterator image = images_g.begin();
@@ -413,20 +396,6 @@ void computeSuperresolutionUngerGPU
 			#else
 				backwardRegistrationBilinearValueTex_gm ( uor_g, flow->u_g, flow->v_g, temp1_g, 0.0f, nx, ny, pitchf1, pitchf1, 1.0f, 1.0f );
 			#endif
-
-			#if IMAGE_DEBUG
-			if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-			{
-				fprintf( stderr, "\nSaving uor backwarped..." );
-				snprintf( cudaDebug, 128, "debug/superresolution/%02d_03_uor_backwarped_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-				saveCudaImage( cudaDebug, temp1_g, nx, ny, pitchf1, 1 );
-
-				fprintf( stderr, "\nSaving input image..." );
-				float *f = (float*)(*image);
-				snprintf( cudaDebug, 128, "debug/superresolution/%02d_04_input_image_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-				saveCudaImage( cudaDebug, f, nx_orig, ny_orig, pitchf1_orig, 1 );
-			}
-		    #endif
 
 			if( blur > 0.0f )
 			{
@@ -441,15 +410,6 @@ void computeSuperresolutionUngerGPU
 				#else
 					// gauss with global memory
 					gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
-				#endif
-
-				#if IMAGE_DEBUG
-				if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-				{
-					fprintf( stderr, "\nSaving uor blurred..." );
-					snprintf( cudaDebug, 128, "debug/superresolution/%02d_05_uor_blurred_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-					saveCudaImage( cudaDebug, temp2_g, nx, ny, pitchf1, 1 );
-				}
 				#endif
 			}
 			else
@@ -472,15 +432,6 @@ void computeSuperresolutionUngerGPU
 						pitchf1_orig,		// output pitch
 						temp4_g				// helper array
 					);
-
-				#if IMAGE_DEBUG
-					if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-					{
-						fprintf( stderr, "\nSaving uor resampled..." );
-						snprintf( cudaDebug, 128, "debug/superresolution/%02d_06_uor_resampled_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-						saveCudaImage( cudaDebug, temp1_g, nx_orig, ny_orig, pitchf1_orig, 1 );
-					}
-				#endif
 			}
 			else
 			{
@@ -495,15 +446,6 @@ void computeSuperresolutionUngerGPU
 			dualL1Difference<<<dimGrid, dimBlock>>>
 						( temp1_g, *image, q_g[k], nx_orig, ny_orig, pitchf1_orig,
 						  factor_degrade_update, factor_degrade_clipping, huber_denom_degrade, tau_d);
-
-			#if IMAGE_DEBUG
-				if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-				{
-					fprintf( stderr, "\nSaving difference image..." );
-					snprintf( cudaDebug, 128, "debug/superresolution/%02d_07_difference_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-					saveCudaImage( cudaDebug,  q_g[k], nx_orig, ny_orig, pitchf1_orig, 1 );
-				}
-			#endif
 		}
 
 		// reset 3rd helper array to zero
@@ -518,15 +460,6 @@ void computeSuperresolutionUngerGPU
 			{
 				// upsample difference images
 				resampleAreaParallelSeparateAdjoined( q_g[k], temp1_g, nx_orig, ny_orig, pitchf1_orig, nx, ny, pitchf1, temp4_g );
-
-				#if IMAGE_DEBUG
-					if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-					{
-						fprintf( stderr, "\nSaving difference resampled..." );
-						snprintf( cudaDebug, 128, "debug/superresolution/%02d_08_difference_resampled_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-						saveCudaImage( cudaDebug, temp1_g, nx, ny, pitchf1, 1 );
-					}
-				#endif
 			}
 			else
 			{
@@ -548,15 +481,6 @@ void computeSuperresolutionUngerGPU
 					// gauss with global memory
 					gaussBlurSeparateMirrorGpu_gm ( temp1_g, temp2_g, nx, ny, pitchf1, blur, blur, (int)(3.0f * blur), temp4_g, 0 );
 				#endif
-
-				#if IMAGE_DEBUG
-					if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-					{
-						fprintf( stderr, "\nSaving difference blurred..." );
-						snprintf( cudaDebug, 128, "debug/superresolution/%02d_09_difference_blurred_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-						saveCudaImage( cudaDebug, temp2_g, nx, ny, pitchf1, 1 );
-					}
-				#endif
 			}
 			else
 			{
@@ -574,59 +498,17 @@ void computeSuperresolutionUngerGPU
 					pitchf1
 				);
 
-			#if IMAGE_DEBUG
-				if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 && k == 0 )
-				{
-					fprintf( stderr, "\nSaving difference foreward warped..." );
-					snprintf( cudaDebug, 128, "debug/superresolution/%02d_10_difference_foreward_warped_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-					saveCudaImage( cudaDebug, temp1_g, nx, ny, pitchf1, 1 );
-				}
-			#endif
-
 			// sum all difference images up
 			addKernel<<<dimGrid, dimBlock>>>( temp1_g, temp3_g, nx, ny, pitchf1 );
 		}
 
-		#if IMAGE_DEBUG
-			if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 )
-			{
-				fprintf( stderr, "\nSaving difference sum..." );
-				snprintf( cudaDebug, 128, "debug/superresolution/%02d_11_sum_differences_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-				saveCudaImage( cudaDebug, temp3_g, nx, ny, pitchf1, 1 );
-			}
-		#endif
 
 		#if SHARED_MEM
-			primal1N_sm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
+			primal1N_sm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g,
+					nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 		#else
-		    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g, nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
-		#endif
-
-		#if IMAGE_DEBUG
-			if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE && i == 10 )
-			{
-				fprintf( stderr, "\nSaving temporary result image..." );
-				snprintf( cudaDebug, 128, "debug/superresolution/%02d_12_result_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-				saveCudaImage( cudaDebug, u_g, nx, ny, pitchf1, 1 );
-
-				fprintf( stderr, "\nSaving new uor..." );
-				snprintf( cudaDebug, 128, "debug/superresolution/%02d_13_new_uor_oi_%d.png", IMAGE_DEBUG_CALL_NUM, i );
-				saveCudaImage( cudaDebug, uor_g, nx, ny, pitchf1, 1 );
-			}
+		    primal1N_gm<<< dimGrid, dimBlock>>>(xi1_g, xi2_g, temp3_g, u_g, uor_g,
+		    		nx, ny, pitchf1, factor_tv_update, factor_degrade_update, tau_p, overrelaxation);
 		#endif
 	}
-
-	#if IMAGE_DEBUG
-		if( IMAGE_DEBUG_CALL_NUM == IMAGE_DEBUG_IMAGE )
-		{
-			fprintf( stderr, "\nSaving result image..." );
-			snprintf( cudaDebug, 128, "debug/superresolution/%02d_14_result.png", IMAGE_DEBUG_CALL_NUM );
-			saveCudaImage( cudaDebug, u_g, nx, ny, pitchf1, 1 );
-		}
-	#endif
-
-	#if IMAGE_DEBUG
-		++IMAGE_DEBUG_CALL_NUM;
-	#endif
-
 }

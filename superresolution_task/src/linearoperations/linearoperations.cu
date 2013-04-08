@@ -55,6 +55,7 @@ bool linearoperation_textures_initialized = false;
 
 __constant__ float constKernelX[MAXKERNELSIZE];
 __constant__ float constKernelY[MAXKERNELSIZE];
+
 // create and bind the gaussian convolution kernels only once
 bool constant_kernel_bound = false;
 
@@ -713,14 +714,18 @@ void forewardRegistrationBilinearAtomic (
  * global memory
  *
  * Of course it is fine to have a universal convolution
- * function that can be used for x and y direction,
- * but specialized ones are faster. A similar kernel
- * could be used with both X radius and Y radius, first
- * invoked with Xradius = radius and Yradius = 1, and
- * then the other way round.
+ * function that can be used both for x and y direction
+ * (separately), but specialized ones are faster. A
+ * similar kernel could be used with both X radius and
+ * Y radius, first invoked with Xradius = radius and
+ * Yradius = 1, and then the other way round.
+ *
  * Here the kernel has been splittet into two similar
  * ones, the first with a hardcoded Yradius of 1, the
  * second with a hardcoded Xradius of 1.
+ *
+ * Convoluting with both 1D kernels in one cuda kernel
+ * could be even faster.
  */
 __global__ void gaussBlurSeparateMirrorGPU_gm_x
 	(
@@ -752,11 +757,11 @@ __global__ void gaussBlurSeparateMirrorGPU_gm_x
 			int xShiftRight = x + i;
 			
 			result += constKernelX[i] * (
-					// left side of kernel
-					( (xShiftLeft >= 0) ? in[y * pitchf1 + xShiftLeft] : in[y * pitchf1 + (-1 - xShiftLeft) ] ) + // border condition: mirroring
+					// left side of kernel. border condition: mirroring
+					( (xShiftLeft >= 0) ? in[y * pitchf1 + xShiftLeft] : in[y * pitchf1 + (-1 - xShiftLeft) ] ) + 
 
-					// right side of kernel
-					( (xShiftRight < nx) ? in[y * pitchf1 + xShiftRight] : in[y * pitchf1 + nx - (xShiftRight - (nx - 1)) ]) // border condition: mirroring
+					// right side of kernel. border condition: mirroring 
+					( (xShiftRight < nx) ? in[y * pitchf1 + xShiftRight] : in[y * pitchf1 + nx - (xShiftRight - (nx - 1)) ])
 				);
 		}
 

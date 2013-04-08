@@ -36,18 +36,8 @@
 
 #include <flowlib/flowlib.hpp>
 
-#define TIME_DBG 0
-
-
 int main(int argc, char *argv[])
 {
-
-#if TIME_DBG
-	double overallTime;
-	struct timespec start, end;
-	clock_gettime(CLOCK_MONOTONIC,  &start);
-#endif
-
 	std::string sourcedirname = "data";
 	std::string resultdirname = "results";
 
@@ -322,14 +312,6 @@ int main(int argc, char *argv[])
 		// /BOOST REPLACEMENT
 		delete superresolution;
 	}
-#if TIME_DBG
-	clock_gettime(CLOCK_MONOTONIC,  &end);
-	overallTime = (end.tv_sec - start.tv_sec) + (double) (end.tv_nsec - start.tv_nsec) * 1e-9;
-	if(computation_device == 1)
-		fprintf(stderr,"\n Time taken by Application on GPU = %f seconds", overallTime);
-	else
-		fprintf(stderr,"\n Time taken by Application on CPU = %f seconds", overallTime);
-#endif
 
 	if(computation_device == 1){
 		size_t total, free;
